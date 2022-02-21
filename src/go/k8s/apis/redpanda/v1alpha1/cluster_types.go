@@ -244,7 +244,84 @@ type ClusterStatus struct {
 	// Indicates cluster is upgrading
 	// +optional
 	Upgrading bool `json:"upgrading"`
+	// Current state of the cluster.
+	// +optional
+	Conditions []ClusterCondition `json:"conditions,omitempty"`
 }
+
+// ClusterCondition contains details for the current conditions of the cluster
+type ClusterCondition struct {
+	// Type is the type of the condition
+	Type ClusterConditionType `json:"type"`
+	// Status is the status of the condition
+	Status corev1.ConditionStatus `json:"status"`
+	// Last time the condition transitioned from one status to another
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
+	// Unique, one-word, CamelCase reason for the condition's last transition
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// Human-readable message indicating details about last transition
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
+// ClusterConditionType is a valid value for ClusterCondition.Type
+// +enum
+type ClusterConditionType string
+
+// These are valid conditions of the cluster.
+const (
+	// ClusterConfiguredConditionType indicates whether the Redpanda cluster configuration is in sync with the desired one
+	ClusterConfiguredConditionType ClusterConditionType = "ClusterConfigured"
+)
+
+func (s *ClusterStatus) GetCondition(
+	cType ClusterConditionType,
+) *ClusterCondition {
+	for i := range s.Conditions {
+		if s.Conditions[i].Type == cType {
+			return &s.Conditions[i]
+		}
+	}
+	return nil
+}
+
+func (s *ClusterStatus) SetCondition(
+	cType ClusterConditionType,
+	status corev1.ConditionStatus,
+	reason, message string,
+) {
+	update := func(c *ClusterCondition) {
+		c.Type = cType
+		c.Status = status
+		c.Reason = reason
+		c.Message = message
+		if c.Status != status {
+			c.LastTransitionTime = metav1.Now()
+		}
+	}
+	// Try updating existing condition
+	for i := range s.Conditions {
+		if s.Conditions[i].Type == cType {
+			update(&s.Conditions[i])
+			return
+		}
+	}
+	// Add a new one if missing
+	newCond := ClusterCondition{}
+	update(&newCond)
+	s.Conditions = append(s.Conditions, newCond)
+}
+
+// These are valid reasons for ClusterConfigured
+const (
+	// ClusterConfiguredReasonSynchronizing indicates that the desired configuration is being applied to the running cluster
+	ClusterConfiguredReasonSynchronizing = "Synchronizing"
+	// ClusterConfiguredReasonUpgrading is a special case of synchronization that happens when upgrading from an older version
+	// that does not support centralized configuration
+	ClusterConfiguredReasonUpgrading = "Upgrading"
+)
 
 // NodesList shows where client of Cluster custom resource can reach
 // various listeners of Redpanda cluster
