@@ -15,6 +15,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	"github.com/go-logr/logr"
@@ -128,7 +129,7 @@ func (r *ConfigMapResource) Ensure(ctx context.Context) error {
 
 // obj returns resource managed client.Object
 func (r *ConfigMapResource) obj(ctx context.Context) (k8sclient.Object, error) {
-	conf, err := r.createConfiguration(ctx)
+	conf, err := r.CreateConfiguration(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +168,7 @@ func (r *ConfigMapResource) obj(ctx context.Context) (k8sclient.Object, error) {
 }
 
 // nolint:funlen // let's keep the configuration in one function for now and refactor later
-func (r *ConfigMapResource) createConfiguration(
+func (r *ConfigMapResource) CreateConfiguration(
 	ctx context.Context,
 ) (*configuration.GlobalConfiguration, error) {
 	cfg := configuration.For(r.pandaCluster.Spec.Version)
@@ -618,10 +619,13 @@ func (r *ConfigMapResource) GetNodeConfigHash(
 	return fmt.Sprintf("%x", md5Hash), nil
 }
 
-func (r *ConfigMapResource) CheckConfigurationDrift(
+func (r *ConfigMapResource) CheckCentralizedConfigurationDrift(
 	ctx context.Context,
 ) (bool, error) {
-	obj, err := r.obj(ctx)
+	if !featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
+		return false, nil
+	}
+	newConfig, err := r.CreateConfiguration(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -633,16 +637,11 @@ func (r *ConfigMapResource) CheckConfigurationDrift(
 		}
 		return false, err
 	}
-	// TODO avoid deserializing current config
-	newConfig, err := extractRedpandaConfiguration(obj.(*corev1.ConfigMap))
-	if err != nil {
-		return false, err
-	}
 	oldConfig, err := extractRedpandaConfiguration(&existing)
 	if err != nil {
 		return false, err
 	}
-	return !newConfig.Equals(oldConfig), nil
+	return !reflect.DeepEqual(oldConfig, newConfig), nil
 }
 
 func extractRedpandaConfiguration(

@@ -1,8 +1,6 @@
 package configuration
 
 import (
-	"reflect"
-
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
 )
@@ -46,8 +44,4 @@ func (c *GlobalConfiguration) SetAdditionalFlatProperties(
 	props map[string]string,
 ) error {
 	return c.Mode.SetAdditionalFlatProperties(c, props)
-}
-
-func (c *GlobalConfiguration) Equals(c2 *GlobalConfiguration) bool {
-	return reflect.DeepEqual(c, c2)
 }

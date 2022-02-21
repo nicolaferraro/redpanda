@@ -287,6 +287,16 @@ func (s *ClusterStatus) GetCondition(
 	return nil
 }
 
+func (s *ClusterStatus) GetConditionStatus(
+	cType ClusterConditionType,
+) corev1.ConditionStatus {
+	cond := s.GetCondition(cType)
+	if cond == nil {
+		return corev1.ConditionUnknown
+	}
+	return cond.Status
+}
+
 func (s *ClusterStatus) SetCondition(
 	cType ClusterConditionType,
 	status corev1.ConditionStatus,

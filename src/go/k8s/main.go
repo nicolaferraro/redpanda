@@ -104,6 +104,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&redpandacontrollers.ClusterConfigurationReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("redpanda").WithName("Cluster-Configuration"),
+		Scheme: mgr.GetScheme(),
+	}).WithClusterDomain(clusterDomain).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create controller", "controller", "Cluster-Configuration")
+		os.Exit(1)
+	}
+
 	if err = redpandacontrollers.NewClusterMetricsController(mgr.GetClient()).
 		SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create controller", "controller", "ClustersMetrics")

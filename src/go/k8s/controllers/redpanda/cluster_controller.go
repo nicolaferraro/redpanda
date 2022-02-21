@@ -172,6 +172,25 @@ func (r *ClusterReconciler) Reconcile(
 	pki := certmanager.NewPki(r.Client, &redpandaCluster, headlessSvc.HeadlessServiceFQDN(r.clusterDomain), clusterSvc.ServiceFQDN(r.clusterDomain), r.Scheme, log)
 	sa := resources.NewServiceAccount(r.Client, &redpandaCluster, r.Scheme, log)
 	configMapResource := resources.NewConfigMap(r.Client, &redpandaCluster, r.Scheme, headlessSvc.HeadlessServiceFQDN(r.clusterDomain), proxySuKey, schemaRegistrySuKey, log)
+
+	// Let's verify if we need to trigger the configuration controller if not already done
+	if redpandaCluster.Status.GetConditionStatus(redpandav1alpha1.ClusterConfiguredConditionType) != corev1.ConditionFalse {
+		// Check if configuration changed
+		if drift, err := configMapResource.CheckCentralizedConfigurationDrift(ctx); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error while checking centralized configuration drift: %w", err)
+		} else if drift {
+			// We need to mark the cluster as changed to trigger the configuration workflow
+			redpandaCluster.Status.SetCondition(
+				redpandav1alpha1.ClusterConfiguredConditionType,
+				corev1.ConditionFalse,
+				redpandav1alpha1.ClusterConfiguredReasonUpdating,
+				"Detected cluster configuration change that needs to be applied to the cluster",
+			)
+			// Changing the status will re-enqueue another request for both controllers
+			return ctrl.Result{}, r.Status().Update(ctx, &redpandaCluster)
+		}
+	}
+
 	sts := resources.NewStatefulSet(
 		r.Client,
 		&redpandaCluster,
