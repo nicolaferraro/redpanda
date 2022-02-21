@@ -19,13 +19,13 @@ import (
 
 	"github.com/go-logr/logr"
 	cmetav1 "github.com/jetstack/cert-manager/pkg/apis/meta/v1"
-	"github.com/spf13/afero"
 	redpandav1alpha1 "github.com/vectorizedio/redpanda/src/go/k8s/apis/redpanda/v1alpha1"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/labels"
+	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/configuration"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
-	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -62,7 +62,8 @@ const (
 
 	saslMechanism = "SCRAM-SHA-256"
 
-	configKey = "redpanda.yaml"
+	configKey          = "redpanda.yaml"
+	bootstrapConfigKey = ".bootstrap.yaml"
 )
 
 var (
@@ -132,7 +133,7 @@ func (r *ConfigMapResource) obj(ctx context.Context) (k8sclient.Object, error) {
 		return nil, err
 	}
 
-	cfgBytes, err := yaml.Marshal(conf)
+	cfgSerialized, err := conf.Serialize()
 	if err != nil {
 		return nil, err
 	}
@@ -147,9 +148,14 @@ func (r *ConfigMapResource) obj(ctx context.Context) (k8sclient.Object, error) {
 			Kind:       "ConfigMap",
 			APIVersion: "v1",
 		},
-		Data: map[string]string{
-			configKey: string(cfgBytes),
-		},
+		Data: map[string]string{},
+	}
+
+	if cfgSerialized.RedpandaFile != nil {
+		cm.Data[configKey] = string(cfgSerialized.RedpandaFile)
+	}
+	if cfgSerialized.BootstrapFile != nil {
+		cm.Data[bootstrapConfigKey] = string(cfgSerialized.BootstrapFile)
 	}
 
 	err = controllerutil.SetControllerReference(r.pandaCluster, cm, r.scheme)
@@ -163,11 +169,12 @@ func (r *ConfigMapResource) obj(ctx context.Context) (k8sclient.Object, error) {
 // nolint:funlen // let's keep the configuration in one function for now and refactor later
 func (r *ConfigMapResource) createConfiguration(
 	ctx context.Context,
-) (*config.Config, error) {
-	cfgRpk := config.Default()
+) (*configuration.GlobalConfiguration, error) {
+	cfg := configuration.For(r.pandaCluster.Spec.Version, r.pandaCluster.Status.Upgrading) // TODO not all upgrades should enable mixed mode (only from 21.x and older)
+	cfg.NodeConfiguration = *config.Default()
 
 	c := r.pandaCluster.Spec.Configuration
-	cr := &cfgRpk.Redpanda
+	cr := &cfg.NodeConfiguration.Redpanda
 
 	internalListener := r.pandaCluster.InternalListener()
 	cr.KafkaApi = []config.NamedSocketAddress{} // we don't want to inherit default kafka port
@@ -266,7 +273,7 @@ func (r *ConfigMapResource) createConfiguration(
 		if secretKeyStr == "" {
 			return nil, fmt.Errorf("secret name %s, ns %s: %w", secretName.Name, secretName.Namespace, errCloudStorageSecretKeyCannotBeEmpty)
 		}
-		r.prepareCloudStorage(cr, secretKeyStr)
+		r.prepareCloudStorage(cfg, secretKeyStr)
 	}
 
 	for _, user := range r.pandaCluster.Spec.Superusers {
@@ -282,14 +289,12 @@ func (r *ConfigMapResource) createConfiguration(
 		cr.GroupTopicPartitions = &partitions
 	}
 
-	if cr.Other == nil {
-		cr.Other = make(map[string]interface{})
-	}
-	cr.Other["auto_create_topics_enabled"] = r.pandaCluster.Spec.Configuration.AutoCreateTopics
-	cr.Other["enable_idempotence"] = true
-	cr.Other["enable_transactions"] = true
+	cfg.SetAdditionalRedpandaProperty("auto_create_topics_enabled", r.pandaCluster.Spec.Configuration.AutoCreateTopics)
+	cfg.SetAdditionalRedpandaProperty("enable_idempotence", true)
+	cfg.SetAdditionalRedpandaProperty("enable_transactions", true)
+
 	if featuregates.ShadowIndex(r.pandaCluster.Spec.Version) {
-		cr.Other["cloud_storage_segment_max_upload_interval_sec"] = 60 * 30 // 60s * 30 = 30 minutes
+		cfg.SetAdditionalRedpandaProperty("cloud_storage_segment_max_upload_interval_sec", 60*30) // 60s * 30 = 30 minutes
 	}
 
 	segmentSize := logSegmentSize
@@ -306,15 +311,15 @@ func (r *ConfigMapResource) createConfiguration(
 		})
 	}
 
-	r.preparePandaproxy(cfgRpk)
-	r.preparePandaproxyTLS(cfgRpk)
-	err := r.preparePandaproxyClient(ctx, cfgRpk)
+	r.preparePandaproxy(&cfg.NodeConfiguration)
+	r.preparePandaproxyTLS(&cfg.NodeConfiguration)
+	err := r.preparePandaproxyClient(ctx, &cfg.NodeConfiguration)
 	if err != nil {
 		return nil, err
 	}
 
 	if sr := r.pandaCluster.Spec.Configuration.SchemaRegistry; sr != nil {
-		cfgRpk.SchemaRegistry.SchemaRegistryAPI = []config.NamedSocketAddress{
+		cfg.NodeConfiguration.SchemaRegistry.SchemaRegistryAPI = []config.NamedSocketAddress{
 			{
 				SocketAddress: config.SocketAddress{
 					Address: "0.0.0.0",
@@ -324,47 +329,17 @@ func (r *ConfigMapResource) createConfiguration(
 			},
 		}
 	}
-	r.prepareSchemaRegistryTLS(cfgRpk)
-	err = r.prepareSchemaRegistryClient(ctx, cfgRpk)
+	r.prepareSchemaRegistryTLS(&cfg.NodeConfiguration)
+	err = r.prepareSchemaRegistryClient(ctx, &cfg.NodeConfiguration)
 	if err != nil {
 		return nil, err
 	}
 
-	mgr := config.NewManager(afero.NewOsFs())
-	err = mgr.Merge(cfgRpk)
-	if err != nil {
+	if err := cfg.SetAdditionalFlatProperties(r.pandaCluster.Spec.AdditionalConfiguration); err != nil {
 		return nil, err
 	}
 
-	// Add arbitrary parameters to configuration
-	for k, v := range r.pandaCluster.Spec.AdditionalConfiguration {
-		if buildInType(v) {
-			err = mgr.Set(k, v, "single")
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			err = mgr.Set(k, v, "")
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return mgr.Get()
-}
-
-func buildInType(value string) bool {
-	if _, err := strconv.Atoi(value); err == nil {
-		return true
-	}
-	if _, err := strconv.ParseFloat(value, 64); err == nil {
-		return true
-	}
-	if _, err := strconv.ParseBool(value); err == nil {
-		return true
-	}
-	return false
+	return cfg, nil
 }
 
 // calculateExternalPort can calculate external Kafka API port based on the internal Kafka API port
@@ -379,8 +354,9 @@ func calculateExternalPort(kafkaInternalPort, specifiedExternalPort int) int {
 }
 
 func (r *ConfigMapResource) prepareCloudStorage(
-	cr *config.RedpandaConfig, secretKeyStr string,
+	cfg *configuration.GlobalConfiguration, secretKeyStr string,
 ) {
+	cr := &cfg.NodeConfiguration.Redpanda
 	cr.CloudStorageEnabled = pointer.BoolPtr(r.pandaCluster.Spec.CloudStorage.Enabled)
 	cr.CloudStorageAccessKey = pointer.StringPtr(r.pandaCluster.Spec.CloudStorage.AccessKey)
 	cr.CloudStorageRegion = pointer.StringPtr(r.pandaCluster.Spec.CloudStorage.Region)
@@ -410,14 +386,11 @@ func (r *ConfigMapResource) prepareCloudStorage(
 	}
 
 	if featuregates.ShadowIndex(r.pandaCluster.Spec.Version) {
-		if cr.Other == nil {
-			cr.Other = make(map[string]interface{})
-		}
-		cr.Other[cloudStorageCacheDirectory] = archivalCacheIndexDirectory
+		cfg.SetAdditionalRedpandaProperty(cloudStorageCacheDirectory, archivalCacheIndexDirectory)
 
 		if r.pandaCluster.Spec.CloudStorage.CacheStorage != nil && r.pandaCluster.Spec.CloudStorage.CacheStorage.Capacity.Value() > 0 {
 			size := strconv.FormatInt(r.pandaCluster.Spec.CloudStorage.CacheStorage.Capacity.Value(), 10)
-			cr.Other["cloud_storage_cache_size"] = size
+			cfg.SetAdditionalRedpandaProperty("cloud_storage_cache_size", size)
 		}
 	}
 }
@@ -642,4 +615,44 @@ func (r *ConfigMapResource) GetConfigHash(ctx context.Context) (string, error) {
 	configString := configMap.Data[configKey]
 	md5Hash := md5.Sum([]byte(configString)) // nolint:gosec // this is not encrypting secure info
 	return fmt.Sprintf("%x", md5Hash), nil
+}
+
+func (r *ConfigMapResource) CheckConfigurationDrift(
+	ctx context.Context,
+) (bool, error) {
+	obj, err := r.obj(ctx)
+	if err != nil {
+		return false, err
+	}
+	existing := corev1.ConfigMap{}
+	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			// No drift if config has never been written
+			return false, nil
+		}
+		return false, err
+	}
+	// TODO avoid deserializing current config
+	newConfig, err := extractRedpandaConfiguration(obj.(*corev1.ConfigMap))
+	if err != nil {
+		return false, err
+	}
+	oldConfig, err := extractRedpandaConfiguration(&existing)
+	if err != nil {
+		return false, err
+	}
+	return !newConfig.Equals(oldConfig), nil
+}
+
+func extractRedpandaConfiguration(
+	cm *corev1.ConfigMap,
+) (*configuration.GlobalConfiguration, error) {
+	ser := configuration.SerializedRedpandaConfiguration{}
+	if d, ok := cm.Data[configKey]; ok {
+		ser.RedpandaFile = []byte(d)
+	}
+	if d, ok := cm.Data[bootstrapConfigKey]; ok {
+		ser.BootstrapFile = []byte(d)
+	}
+	return ser.Deserialize()
 }
