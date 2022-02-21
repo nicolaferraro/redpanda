@@ -7,15 +7,21 @@ import (
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
 )
 
+const (
+	// useMixedConfiguration can be temporarily used until .boostrap.yaml is fully supported.
+	useMixedConfiguration = true
+)
+
 type GlobalConfiguration struct {
 	NodeConfiguration    config.Config
 	ClusterConfiguration map[string]interface{}
 	Mode                 GlobalConfigurationMode
 }
 
-func For(version string, upgrading bool) *GlobalConfiguration {
+func For(version string) *GlobalConfiguration {
 	if version != "" && featuregates.CentralizedConfiguration(version) {
-		if upgrading {
+		// Use mixed config temporarily
+		if useMixedConfiguration {
 			return &GlobalConfiguration{
 				Mode: GlobalConfigurationModeMixed,
 			}

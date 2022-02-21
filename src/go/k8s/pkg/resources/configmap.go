@@ -170,7 +170,7 @@ func (r *ConfigMapResource) obj(ctx context.Context) (k8sclient.Object, error) {
 func (r *ConfigMapResource) createConfiguration(
 	ctx context.Context,
 ) (*configuration.GlobalConfiguration, error) {
-	cfg := configuration.For(r.pandaCluster.Spec.Version, r.pandaCluster.Status.Upgrading) // TODO not all upgrades should enable mixed mode (only from 21.x and older)
+	cfg := configuration.For(r.pandaCluster.Spec.Version)
 	cfg.NodeConfiguration = *config.Default()
 
 	c := r.pandaCluster.Spec.Configuration

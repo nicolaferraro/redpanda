@@ -316,11 +316,10 @@ func (s *ClusterStatus) SetCondition(
 
 // These are valid reasons for ClusterConfigured
 const (
-	// ClusterConfiguredReasonSynchronizing indicates that the desired configuration is being applied to the running cluster
-	ClusterConfiguredReasonSynchronizing = "Synchronizing"
-	// ClusterConfiguredReasonUpgrading is a special case of synchronization that happens when upgrading from an older version
-	// that does not support centralized configuration
-	ClusterConfiguredReasonUpgrading = "Upgrading"
+	// ClusterConfiguredReasonUpdating indicates that the desired configuration is being applied to the running cluster
+	ClusterConfiguredReasonUpdating = "Updating"
+	// ClusterConfiguredReasonError signals an unrecoverable error when applying the configuration to the Redpanda cluster
+	ClusterConfiguredReasonError = "Error"
 )
 
 // NodesList shows where client of Cluster custom resource can reach
