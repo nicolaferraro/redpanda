@@ -190,7 +190,7 @@ func (r *ClusterReconciler) Reconcile(
 		pki.SchemaRegistryAPIClientCert(),
 		sa.Key().Name,
 		r.configuratorSettings,
-		configMapResource.GetConfigHash,
+		configMapResource.GetNodeConfigHash,
 		log)
 
 	toApply := []resources.Reconciler{

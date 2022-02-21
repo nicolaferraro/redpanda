@@ -604,9 +604,10 @@ func generatePassword(length int) (string, error) {
 	return string(bytes), nil
 }
 
-// GetConfigHash returns md5 hash of configmap contents so two configmaps can be
-// compared
-func (r *ConfigMapResource) GetConfigHash(ctx context.Context) (string, error) {
+// GetNodeConfigHash returns md5 hash of the configmap `redpanda.yaml` file only (used prior to 22.1)
+func (r *ConfigMapResource) GetNodeConfigHash(
+	ctx context.Context,
+) (string, error) {
 	obj, err := r.obj(ctx)
 	if err != nil {
 		return "", err

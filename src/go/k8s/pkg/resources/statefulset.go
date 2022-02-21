@@ -96,12 +96,12 @@ type StatefulSetResource struct {
 	schemaRegistryClientCertSecretKey  types.NamespacedName
 	serviceAccountName                 string
 	configuratorSettings               ConfiguratorSettings
-	// hash of configmap containing configuration for redpanda, it's injected to
+	// hash of configmap containing configuration for redpanda (node config only), it's injected to
 	// annotation to ensure the pods get restarted when configuration changes
 	// this has to be retrieved lazily to achieve the correct order of resources
 	// being applied
-	configMapHashGetter func(context.Context) (string, error)
-	logger              logr.Logger
+	nodeConfigMapHashGetter func(context.Context) (string, error)
+	logger                  logr.Logger
 
 	LastObservedState *appsv1.StatefulSet
 }
@@ -125,7 +125,7 @@ func NewStatefulSet(
 	schemaRegistryClientCertSecretKey types.NamespacedName,
 	serviceAccountName string,
 	configuratorSettings ConfiguratorSettings,
-	configMapHashGetter func(context.Context) (string, error),
+	nodeConfigMapHashGetter func(context.Context) (string, error),
 	logger logr.Logger,
 ) *StatefulSetResource {
 	return &StatefulSetResource{
@@ -147,7 +147,7 @@ func NewStatefulSet(
 		schemaRegistryClientCertSecretKey,
 		serviceAccountName,
 		configuratorSettings,
-		configMapHashGetter,
+		nodeConfigMapHashGetter,
 		logger.WithValues("Kind", statefulSetKind()),
 		nil,
 	}
@@ -188,6 +188,21 @@ func (r *StatefulSetResource) Ensure(ctx context.Context) error {
 		return fmt.Errorf("error while fetching StatefulSet resource: %w", err)
 	}
 	r.LastObservedState = &sts
+
+	if featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
+		// When using central config, the statefulset must retain the configuration hash set on the existing resource
+		// by a secondary controller.
+		// TODO: remove this when switching to server side apply.
+		newSts := obj.(*appsv1.StatefulSet)
+		if _, ok := newSts.Annotations[configMapHashAnnotationKey]; !ok {
+			if oldVal, oldOk := sts.Annotations[configMapHashAnnotationKey]; oldOk {
+				if newSts.Annotations == nil {
+					newSts.Annotations = make(map[string]string)
+				}
+				newSts.Annotations[configMapHashAnnotationKey] = oldVal
+			}
+		}
+	}
 
 	r.logger.Info("Running update", "resource name", r.Key().Name)
 	return r.runUpdate(ctx, &sts, obj.(*appsv1.StatefulSet))
@@ -238,11 +253,17 @@ func (r *StatefulSetResource) obj(
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	configMapHash, err := r.configMapHashGetter(ctx)
-	if err != nil {
-		return nil, err
+
+	if !featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
+		// We embed config hash statically here only for older clusters.
+		// With centralized configuration, there are properties that
+		// don't require restart, but they can be only computed at runtime via API.
+		configMapHash, err := r.nodeConfigMapHashGetter(ctx)
+		if err != nil {
+			return nil, err
+		}
+		annotations[configMapHashAnnotationKey] = configMapHash
 	}
-	annotations[configMapHashAnnotationKey] = configMapHash
 	tolerations := r.pandaCluster.Spec.Tolerations
 	nodeSelector := r.pandaCluster.Spec.NodeSelector
 
@@ -475,7 +496,7 @@ func (r *StatefulSetResource) obj(
 		ss.Spec.Template.Spec.Containers = append(ss.Spec.Template.Spec.Containers, *rpkStatusContainer)
 	}
 
-	err = controllerutil.SetControllerReference(r.pandaCluster, ss, r.scheme)
+	err := controllerutil.SetControllerReference(r.pandaCluster, ss, r.scheme)
 	if err != nil {
 		return nil, err
 	}

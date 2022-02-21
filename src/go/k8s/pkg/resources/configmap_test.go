@@ -129,7 +129,7 @@ func TestEnsureConfigMap_AdditionalConfig(t *testing.T) {
 			require.NoError(t, err)
 			data := actual.Data["redpanda.yaml"]
 			require.True(t, strings.Contains(data, tc.expectedString), fmt.Sprintf("expecting %s but got %v", tc.expectedString, data))
-			hash, err := cfgRes.GetConfigHash(context.TODO())
+			hash, err := cfgRes.GetNodeConfigHash(context.TODO())
 			require.NoError(t, err)
 			require.Equal(t, tc.expectedHash, hash)
 		})
