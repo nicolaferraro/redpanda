@@ -23,6 +23,7 @@ import (
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/networking"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/certmanager"
+	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/api/admin"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
 	appsv1 "k8s.io/api/apps/v1"
@@ -517,23 +518,11 @@ func (r *ClusterReconciler) setInitialSuperUserPassword(
 	fqdn string,
 	objs []types.NamespacedName,
 ) error {
-	adminInternal := redpandaCluster.AdminAPIInternal()
-	if adminInternal == nil {
+	adminAPI, err := utils.NewInternalAdminAPI(redpandaCluster, fqdn)
+	if err != nil && errors.Is(err, &utils.NoInternalAdminAPI{}) {
 		return nil
-	}
-
-	adminInternalPort := adminInternal.Port
-
-	var urls []string
-	replicas := *redpandaCluster.Spec.Replicas
-
-	for i := int32(0); i < replicas; i++ {
-		urls = append(urls, fmt.Sprintf("%s-%d.%s:%d", redpandaCluster.Name, i, fqdn, adminInternalPort))
-	}
-
-	adminAPI, err := admin.NewAdminAPI(urls, nil)
-	if err != nil {
-		return fmt.Errorf("creating admin api: %w", err)
+	} else if err != nil {
+		return err
 	}
 
 	for _, obj := range objs {

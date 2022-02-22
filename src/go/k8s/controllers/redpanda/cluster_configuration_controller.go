@@ -11,6 +11,7 @@ package redpanda
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -18,6 +19,7 @@ import (
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/networking"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
+	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -48,8 +50,8 @@ func (r *ClusterConfigurationReconciler) Reconcile(
 ) (ctrl.Result, error) {
 	log := r.Log.WithValues("redpandacluster-configuration", req.NamespacedName)
 
-	log.Info(fmt.Sprintf("Starting reconcile loop for %v", req.NamespacedName))
-	defer log.Info(fmt.Sprintf("Finished reconcile loop for %v", req.NamespacedName))
+	log.Info(fmt.Sprintf("Starting configuration reconcile loop for %v", req.NamespacedName))
+	defer log.Info(fmt.Sprintf("Finished configuration reconcile loop for %v", req.NamespacedName))
 
 	var redpandaCluster redpandav1alpha1.Cluster
 	if err := r.Get(ctx, req.NamespacedName, &redpandaCluster); err != nil {
@@ -99,10 +101,38 @@ func (r *ClusterConfigurationReconciler) Reconcile(
 
 	configMapResource := resources.NewConfigMap(r.Client, &redpandaCluster, r.Scheme, headlessSvc.HeadlessServiceFQDN(r.clusterDomain), proxySuKey, schemaRegistrySuKey, log)
 
-	_, err := configMapResource.CreateConfiguration(ctx)
+	config, err := configMapResource.CreateConfiguration(ctx)
 	if err != nil {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, fmt.Errorf("error while creating the configuration for cluster %v: %w", req.NamespacedName, err)
 	}
+
+	adminAPI, err := utils.NewInternalAdminAPI(&redpandaCluster, headlessSvc.HeadlessServiceFQDN(r.clusterDomain))
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("error connecting to the admin API of cluster %v: %w", req.NamespacedName, err)
+	}
+
+	schema, err := adminAPI.ClusterConfigSchema()
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not get centralized configuration schema from cluster %v: %w", req.NamespacedName, err)
+	}
+
+	clusterConfig, err := adminAPI.Config()
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not get current centralized configuration from cluster %v: %w", req.NamespacedName, err)
+	}
+
+	schemaJSON, _ := json.Marshal(schema)
+	curr, _ := json.Marshal(config.ClusterConfiguration)
+	clus, _ := json.Marshal(clusterConfig)
+
+	fmt.Println("-- schema --")
+	fmt.Println(string(schemaJSON))
+	fmt.Println("-- current --")
+	fmt.Println(string(curr))
+	fmt.Println("-- cluster --")
+	fmt.Println(string(clus))
+	fmt.Println("-- end --")
+
 	// TODO apply the new config
 	return ctrl.Result{}, nil
 }
