@@ -10,9 +10,9 @@
 package redpanda
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	redpandav1alpha1 "github.com/vectorizedio/redpanda/src/go/k8s/apis/redpanda/v1alpha1"
@@ -43,6 +43,23 @@ type configurationPatch struct {
 	remove []string
 }
 
+func (p configurationPatch) String() string {
+	var buffer bytes.Buffer
+	var sep = ""
+	for k, v := range p.upsert {
+		fmt.Fprint(&buffer, fmt.Sprintf("%s%s=%v", sep, k, v))
+		sep = " "
+	}
+	// TODO unskip this part
+	/*
+		for _, r := range p.remove {
+			fmt.Fprint(&buffer, fmt.Sprintf("%s-%s", sep, r))
+			sep = " "
+		}
+	*/
+	return buffer.String()
+}
+
 //+kubebuilder:rbac:groups=redpanda.vectorized.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=redpanda.vectorized.io,resources=clusters/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
@@ -68,12 +85,12 @@ func (r *ClusterConfigurationReconciler) Reconcile(
 	}
 
 	if redpandaCluster.Spec.Version == "" || !featuregates.CentralizedConfiguration(redpandaCluster.Spec.Version) {
-		// This controller should only watch clusters using the new centralized configuration
+		log.Info(fmt.Sprintf("Cluster %v is not using centralized configuration, skipping...", req.NamespacedName))
 		return ctrl.Result{}, nil
 	}
 
 	if redpandaCluster.Status.GetConditionStatus(redpandav1alpha1.ClusterConfiguredConditionType) != corev1.ConditionFalse {
-		// We execute the config update workflow only if explicitly triggered via change in the condition
+		log.Info(fmt.Sprintf("Configuration for cluster %v is in sync", req.NamespacedName))
 		return ctrl.Result{}, nil
 	}
 
@@ -112,6 +129,8 @@ func (r *ClusterConfigurationReconciler) Reconcile(
 		return ctrl.Result{}, fmt.Errorf("error while creating the configuration for cluster %v: %w", req.NamespacedName, err)
 	}
 
+	// TODO wait for the service to be ready before connecting to the admin API
+
 	adminAPI, err := utils.NewInternalAdminAPI(&redpandaCluster, headlessSvc.HeadlessServiceFQDN(r.clusterDomain))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error connecting to the admin API of cluster %v: %w", req.NamespacedName, err)
@@ -129,6 +148,7 @@ func (r *ClusterConfigurationReconciler) Reconcile(
 
 	patch := r.computePatch(config.ClusterConfiguration, clusterConfig)
 	if len(patch.upsert) > 0 { // TODO consider also removing fields (not done here because the `/v1/config` endpoint returns all properties, including node props and defaults
+		log.Info("Applying patch to the cluster", "cluster", req.NamespacedName, "patch", patch)
 		_, err := adminAPI.PatchClusterConfig(patch.upsert, nil)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("could not patch centralized configuration on cluster %v: %w", req.NamespacedName, err)
@@ -176,7 +196,7 @@ func (r *ClusterConfigurationReconciler) Reconcile(
 func (r *ClusterConfigurationReconciler) computePatch(current, old map[string]interface{}) configurationPatch {
 	patch := configurationPatch{}
 	for k, v := range current {
-		if oldValue, ok := old[k]; !ok || !reflect.DeepEqual(v, oldValue) {
+		if oldValue, ok := old[k]; !ok || !valueEquals(v, oldValue) {
 			if patch.upsert == nil {
 				patch.upsert = make(map[string]interface{})
 			}
@@ -189,6 +209,14 @@ func (r *ClusterConfigurationReconciler) computePatch(current, old map[string]in
 		}
 	}
 	return patch
+}
+
+func valueEquals(v1, v2 interface{}) bool {
+	// TODO verify if there's a better way
+	// Problems are e.g. when unmarshalled from JSON, numeric values become float64, while they are int when computed
+	sv1 := fmt.Sprintf("%v", v1)
+	sv2 := fmt.Sprintf("%v", v2)
+	return sv1 == sv2
 }
 
 func (r *ClusterConfigurationReconciler) filterRestartKeys(schema admin.ConfigSchema, config map[string]interface{}) map[string]bool {
