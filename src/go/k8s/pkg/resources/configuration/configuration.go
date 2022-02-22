@@ -1,6 +1,9 @@
 package configuration
 
 import (
+	"crypto/md5"
+	"fmt"
+
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
 )
@@ -44,4 +47,25 @@ func (c *GlobalConfiguration) SetAdditionalFlatProperties(
 	props map[string]string,
 ) error {
 	return c.Mode.SetAdditionalFlatProperties(c, props)
+}
+
+func (c *GlobalConfiguration) GetHash(filterClusterProps map[string]bool) (string, error) {
+	clone := *c
+	clone.ClusterConfiguration = make(map[string]interface{})
+	for k, v := range c.ClusterConfiguration {
+		if p, ok := filterClusterProps[k]; ok && p {
+			clone.ClusterConfiguration[k] = v
+		}
+	}
+
+	serialized, err := clone.Serialize()
+	if err != nil {
+		return "", err
+	}
+
+	full := append([]byte{}, serialized.RedpandaFile...)
+	full = append(full, serialized.BootstrapFile...)
+
+	md5Hash := md5.Sum(full) // nolint:gosec // this is not encrypting secure info
+	return fmt.Sprintf("%x", md5Hash), nil
 }

@@ -11,8 +11,8 @@ package redpanda
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	redpandav1alpha1 "github.com/vectorizedio/redpanda/src/go/k8s/apis/redpanda/v1alpha1"
@@ -20,6 +20,7 @@ import (
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
+	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/api/admin"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,6 +36,11 @@ type ClusterConfigurationReconciler struct {
 	Log           logr.Logger
 	clusterDomain string
 	Scheme        *runtime.Scheme
+}
+
+type configurationPatch struct {
+	upsert map[string]interface{}
+	remove []string
 }
 
 //+kubebuilder:rbac:groups=redpanda.vectorized.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
@@ -116,25 +122,85 @@ func (r *ClusterConfigurationReconciler) Reconcile(
 		return ctrl.Result{}, fmt.Errorf("could not get centralized configuration schema from cluster %v: %w", req.NamespacedName, err)
 	}
 
-	clusterConfig, err := adminAPI.Config()
+	clusterConfig, err := adminAPI.Config() // TODO use ClusterConfig when available
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("could not get current centralized configuration from cluster %v: %w", req.NamespacedName, err)
 	}
 
-	schemaJSON, _ := json.Marshal(schema)
-	curr, _ := json.Marshal(config.ClusterConfiguration)
-	clus, _ := json.Marshal(clusterConfig)
+	patch := r.computePatch(config.ClusterConfiguration, clusterConfig)
+	if len(patch.upsert) > 0 { // TODO consider also removing fields (not done here because the `/v1/config` endpoint returns all properties, including node props and defaults
+		_, err := adminAPI.PatchClusterConfig(patch.upsert, nil)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not patch centralized configuration on cluster %v: %w", req.NamespacedName, err)
+		}
+	}
 
-	fmt.Println("-- schema --")
-	fmt.Println(string(schemaJSON))
-	fmt.Println("-- current --")
-	fmt.Println(string(curr))
-	fmt.Println("-- cluster --")
-	fmt.Println(string(clus))
-	fmt.Println("-- end --")
+	filterRestart := r.filterRestartKeys(schema, config.ClusterConfiguration)
+	hash, err := config.GetHash(filterRestart)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not compute hash of the new configuration for cluster %v: %w", req.NamespacedName, err)
+	}
 
-	// TODO apply the new config
+	stsKey := types.NamespacedName{Name: redpandaCluster.Name, Namespace: redpandaCluster.Namespace}
+	sts := appsv1.StatefulSet{}
+	if err := r.Get(ctx, stsKey, &sts); err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not get statefulset %v: %w", stsKey, err)
+	}
+
+	oldHash := sts.Annotations[resources.ConfigMapHashAnnotationKey]
+	if oldHash != hash {
+		// Needs restart
+		if sts.Annotations == nil {
+			sts.Annotations = make(map[string]string)
+		}
+		sts.Annotations[resources.ConfigMapHashAnnotationKey] = hash
+		// ignoring banzaicloud last modified annotation on purpose
+		if err := r.Update(ctx, &sts); err != nil {
+			return ctrl.Result{}, fmt.Errorf("could not update config hash on statefulset %v: %w", stsKey, err)
+		}
+	}
+
+	// Finally update the condition
+	redpandaCluster.Status.SetCondition(
+		redpandav1alpha1.ClusterConfiguredConditionType,
+		corev1.ConditionTrue,
+		"", "",
+	)
+	if err := r.Status().Update(ctx, &redpandaCluster); err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not update condition on cluster %v: %w", req.NamespacedName, err)
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *ClusterConfigurationReconciler) computePatch(current, old map[string]interface{}) configurationPatch {
+	patch := configurationPatch{}
+	for k, v := range current {
+		if oldValue, ok := old[k]; !ok || !reflect.DeepEqual(v, oldValue) {
+			if patch.upsert == nil {
+				patch.upsert = make(map[string]interface{})
+			}
+			patch.upsert[k] = v
+		}
+	}
+	for k := range old {
+		if _, ok := current[k]; !ok {
+			patch.remove = append(patch.remove, k)
+		}
+	}
+	return patch
+}
+
+func (r *ClusterConfigurationReconciler) filterRestartKeys(schema admin.ConfigSchema, config map[string]interface{}) map[string]bool {
+	filter := make(map[string]bool, len(config))
+	for k := range config {
+		if s, ok := schema[k]; ok {
+			if s.NeedsRestart {
+				filter[k] = true
+			}
+		}
+	}
+	return filter
 }
 
 // SetupWithManager sets up the controller with the Manager.

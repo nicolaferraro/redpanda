@@ -64,7 +64,7 @@ const (
 )
 
 var (
-	configMapHashAnnotationKey = redpandav1alpha1.GroupVersion.Group + "/configmap-hash"
+	ConfigMapHashAnnotationKey = redpandav1alpha1.GroupVersion.Group + "/configmap-hash"
 )
 
 // ConfiguratorSettings holds settings related to configurator container and deployment
@@ -194,12 +194,12 @@ func (r *StatefulSetResource) Ensure(ctx context.Context) error {
 		// by a secondary controller.
 		// TODO: remove this when switching to server side apply.
 		newSts := obj.(*appsv1.StatefulSet)
-		if _, ok := newSts.Annotations[configMapHashAnnotationKey]; !ok {
-			if oldVal, oldOk := sts.Annotations[configMapHashAnnotationKey]; oldOk {
+		if _, ok := newSts.Annotations[ConfigMapHashAnnotationKey]; !ok {
+			if oldVal, oldOk := sts.Annotations[ConfigMapHashAnnotationKey]; oldOk {
 				if newSts.Annotations == nil {
 					newSts.Annotations = make(map[string]string)
 				}
-				newSts.Annotations[configMapHashAnnotationKey] = oldVal
+				newSts.Annotations[ConfigMapHashAnnotationKey] = oldVal
 			}
 		}
 	}
@@ -262,7 +262,7 @@ func (r *StatefulSetResource) obj(
 		if err != nil {
 			return nil, err
 		}
-		annotations[configMapHashAnnotationKey] = configMapHash
+		annotations[ConfigMapHashAnnotationKey] = configMapHash
 	}
 	tolerations := r.pandaCluster.Spec.Tolerations
 	nodeSelector := r.pandaCluster.Spec.NodeSelector
