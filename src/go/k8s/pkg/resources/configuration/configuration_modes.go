@@ -1,7 +1,6 @@
 package configuration
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/spf13/afero"
@@ -73,7 +72,7 @@ func (r globalConfigurationModeCentralized) SetAdditionalRedpandaProperty(
 	if targetConfig.ClusterConfiguration == nil {
 		targetConfig.ClusterConfiguration = make(map[string]interface{})
 	}
-	targetConfig.ClusterConfiguration[fmt.Sprintf("redpanda.%s", key)] = value
+	targetConfig.ClusterConfiguration[key] = value
 }
 
 func (r globalConfigurationModeCentralized) SetAdditionalFlatProperties(
