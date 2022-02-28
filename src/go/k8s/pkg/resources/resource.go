@@ -16,6 +16,7 @@ import (
 
 	"github.com/banzaicloud/k8s-objectmatcher/patch"
 	"github.com/go-logr/logr"
+	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -127,6 +128,7 @@ func Update(
 		patch.IgnoreStatusFields(),
 		patch.IgnoreVolumeClaimTemplateTypeMetaAndStatus(),
 		patch.IgnorePDBSelector(),
+		utils.IgnoreAnnotation(LastAppliedConfigurationKeysAnnotationKey),
 	}
 	patchResult, err := patch.DefaultPatchMaker.Calculate(current, modified, opts...)
 	if err != nil {
@@ -150,6 +152,7 @@ func Update(
 			return false, err
 		}
 		prepareResourceForUpdate(current, modified)
+		// TODO why not just using PATCH instead of copying data from current?
 		if err := c.Update(ctx, modified); err != nil {
 			return false, fmt.Errorf("failed to update resource: %w", err)
 		}
@@ -179,6 +182,14 @@ func prepareResourceForUpdate(current runtime.Object, modified client.Object) {
 	case *corev1.ServiceAccount:
 		sa := t
 		sa.Secrets = current.(*corev1.ServiceAccount).Secrets
+	// Additional cases due to controller using update instead of patch
+	case *corev1.ConfigMap:
+		cm := t
+		if cm.Annotations == nil {
+			cm.Annotations = make(map[string]string)
+		}
+		// We always ignore this annotation during normal reconciliation
+		cm.Annotations[LastAppliedConfigurationKeysAnnotationKey] = current.(*corev1.ConfigMap).Annotations[LastAppliedConfigurationKeysAnnotationKey]
 	}
 }
 

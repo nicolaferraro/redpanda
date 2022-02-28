@@ -11,6 +11,7 @@
 package redpanda
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/networking"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/certmanager"
+	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/api/admin"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
@@ -49,6 +51,25 @@ type ClusterReconciler struct {
 	configuratorSettings resources.ConfiguratorSettings
 	clusterDomain        string
 	Scheme               *runtime.Scheme
+}
+
+type configurationPatch struct {
+	upsert map[string]interface{}
+	remove []string
+}
+
+func (p configurationPatch) String() string {
+	var buffer bytes.Buffer
+	var sep = ""
+	for k, v := range p.upsert {
+		fmt.Fprint(&buffer, fmt.Sprintf("%s%s=%v", sep, k, v))
+		sep = " "
+	}
+	for _, r := range p.remove {
+		fmt.Fprint(&buffer, fmt.Sprintf("%s-%s", sep, r))
+		sep = " "
+	}
+	return buffer.String()
 }
 
 //+kubebuilder:rbac:groups=redpanda.vectorized.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
@@ -282,7 +303,145 @@ func (r *ClusterReconciler) Reconcile(
 		log.Error(err, "Unable to report status")
 	}
 
+	err = r.SyncCentralizedConfig(
+		ctx,
+		&redpandaCluster,
+		configMapResource,
+		headlessSvc.HeadlessServiceFQDN(r.clusterDomain),
+		log,
+	)
 	return ctrl.Result{}, err
+}
+
+func (r *ClusterReconciler) SyncCentralizedConfig(ctx context.Context, redpandaCluster *redpandav1alpha1.Cluster, configMapResource *resources.ConfigMapResource, fqdn string, log logr.Logger) error {
+	if !featuregates.CentralizedConfiguration(redpandaCluster.Spec.Version) {
+		log.Info("Cluster is not using centralized configuration, skipping...")
+		return nil
+	}
+
+	if redpandaCluster.Status.GetConditionStatus(redpandav1alpha1.ClusterConfiguredConditionType) != corev1.ConditionFalse {
+		log.Info("Cluster configuration is synchronized")
+		return nil
+	}
+
+	config, err := configMapResource.CreateConfiguration(ctx)
+	if err != nil {
+		return fmt.Errorf("error while producing the configuration for cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
+	}
+	// TODO wait for the service to be ready before connecting to the admin API
+
+	adminAPI, err := utils.NewInternalAdminAPI(redpandaCluster, fqdn)
+	if err != nil {
+		return fmt.Errorf("error connecting to the admin API of cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
+	}
+	schema, err := adminAPI.ClusterConfigSchema()
+	if err != nil {
+		return fmt.Errorf("could not get centralized configuration schema from cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
+	}
+
+	clusterConfig, err := adminAPI.Config() // TODO use ClusterConfig when available
+	if err != nil {
+		return fmt.Errorf("could not get current centralized configuration from cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
+	}
+
+	lastUsedKeys, err := configMapResource.GetLastUsedConfigurationKeys(ctx)
+	if err != nil {
+		return err
+	}
+	// TODO here we might want to augment and patch the list with property keys we're going to apply, to avoid any kind of data loss
+
+	patch := computePatch(config.ClusterConfiguration, clusterConfig, lastUsedKeys)
+	if len(patch.upsert) > 0 || len(patch.remove) > 0 {
+		log.Info("Applying patch to the cluster", "patch", patch)
+		_, err := adminAPI.PatchClusterConfig(patch.upsert, patch.remove)
+		if err != nil {
+			return fmt.Errorf("could not patch centralized configuration on cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
+		}
+	}
+
+	// Mark the new keys for next update
+	newKeys := config.GetClusterConfigurationKeys()
+	if !reflect.DeepEqual(lastUsedKeys, newKeys) {
+		if err := configMapResource.SetLastUsedConfigurationKeys(ctx, newKeys); err != nil {
+			return fmt.Errorf("could not mark configuration keys sent to cluster: %w", err)
+		}
+	}
+
+	filterRestart := filterRestartKeys(schema, config.ClusterConfiguration)
+	hash, err := config.GetHash(filterRestart)
+	if err != nil {
+		return fmt.Errorf("could not compute hash of the new configuration for cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
+	}
+
+	stsKey := types.NamespacedName{Name: redpandaCluster.Name, Namespace: redpandaCluster.Namespace}
+	sts := appsv1.StatefulSet{}
+	if err := r.Get(ctx, stsKey, &sts); err != nil {
+		return fmt.Errorf("could not get statefulset %v: %w", stsKey, err)
+	}
+
+	oldHash := sts.Annotations[resources.ConfigMapHashAnnotationKey]
+	if oldHash != hash {
+		// Needs restart
+		if sts.Annotations == nil {
+			sts.Annotations = make(map[string]string)
+		}
+		sts.Annotations[resources.ConfigMapHashAnnotationKey] = hash
+		// ignoring banzaicloud last modified annotation on purpose
+		if err := r.Update(ctx, &sts); err != nil {
+			return fmt.Errorf("could not update config hash on statefulset %v: %w", stsKey, err)
+		}
+	}
+
+	// Finally update the condition
+	redpandaCluster.Status.SetCondition(
+		redpandav1alpha1.ClusterConfiguredConditionType,
+		corev1.ConditionTrue,
+		"", "",
+	)
+	if err := r.Status().Update(ctx, redpandaCluster); err != nil {
+		return fmt.Errorf("could not update condition on cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
+	}
+
+	return nil
+}
+
+func computePatch(current, old map[string]interface{}, lastUsedKeys []string) configurationPatch {
+	patch := configurationPatch{
+		// Initialize them early since nil values are rejected by the server
+		upsert: make(map[string]interface{}),
+		remove: make([]string, 0),
+	}
+	for k, v := range current {
+		if oldValue, ok := old[k]; !ok || !valueEquals(v, oldValue) {
+			patch.upsert[k] = v
+		}
+	}
+	for _, k := range lastUsedKeys {
+		if _, ok := current[k]; !ok {
+			patch.remove = append(patch.remove, k)
+		}
+	}
+	return patch
+}
+
+func valueEquals(v1, v2 interface{}) bool {
+	// TODO verify if there's a better way
+	// Problems are e.g. when unmarshalled from JSON, numeric values become float64, while they are int when computed
+	sv1 := fmt.Sprintf("%v", v1)
+	sv2 := fmt.Sprintf("%v", v2)
+	return sv1 == sv2
+}
+
+func filterRestartKeys(schema admin.ConfigSchema, config map[string]interface{}) map[string]bool {
+	filter := make(map[string]bool, len(config))
+	for k := range config {
+		if s, ok := schema[k]; ok {
+			if s.NeedsRestart {
+				filter[k] = true
+			}
+		}
+	}
+	return filter
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -520,6 +679,7 @@ func (r *ClusterReconciler) setInitialSuperUserPassword(
 ) error {
 	adminAPI, err := utils.NewInternalAdminAPI(redpandaCluster, fqdn)
 	if err != nil && errors.Is(err, &utils.NoInternalAdminAPI{}) {
+		// TODO maybe this is not equivalent to previous behavior
 		return nil
 	} else if err != nil {
 		return err

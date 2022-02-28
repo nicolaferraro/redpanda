@@ -33,7 +33,7 @@ func (c *GlobalConfiguration) Serialize() (
 	return &res, nil
 }
 
-func (s *SerializedRedpandaConfiguration) Deserialize() (
+func (s *SerializedRedpandaConfiguration) Deserialize(mode GlobalConfigurationMode) (
 	*GlobalConfiguration,
 	error,
 ) {
@@ -48,5 +48,6 @@ func (s *SerializedRedpandaConfiguration) Deserialize() (
 			return nil, fmt.Errorf("could not deserialize cluster config: %w", err)
 		}
 	}
+	res.Mode = mode // mode is not serialized
 	return &res, nil
 }

@@ -256,8 +256,7 @@ func (r *StatefulSetResource) obj(
 
 	if !featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
 		// We embed config hash statically here only for older clusters.
-		// With centralized configuration, there are properties that
-		// don't require restart, but they can be only computed at runtime via API.
+		// In any case, the annotation is marked to be ignored by the patch mechanism.
 		configMapHash, err := r.nodeConfigMapHashGetter(ctx)
 		if err != nil {
 			return nil, err

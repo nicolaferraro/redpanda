@@ -3,6 +3,7 @@ package configuration
 import (
 	"crypto/md5"
 	"fmt"
+	"sort"
 
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
@@ -68,4 +69,13 @@ func (c *GlobalConfiguration) GetHash(filterClusterProps map[string]bool) (strin
 
 	md5Hash := md5.Sum(full) // nolint:gosec // this is not encrypting secure info
 	return fmt.Sprintf("%x", md5Hash), nil
+}
+
+func (c *GlobalConfiguration) GetClusterConfigurationKeys() []string {
+	keys := make([]string, 0, len(c.ClusterConfiguration))
+	for k := range c.ClusterConfiguration {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

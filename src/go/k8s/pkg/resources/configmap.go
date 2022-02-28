@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/md5" // nolint:gosec // this is not encrypting secure info
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -70,6 +71,9 @@ const (
 var (
 	errKeyDoesNotExistInSecretData        = errors.New("cannot find key in secret data")
 	errCloudStorageSecretKeyCannotBeEmpty = errors.New("cloud storage SecretKey string cannot be empty")
+
+	// LastAppliedConfigurationKeysAnnotationKey is used to store the centralized configuration keys for three-way merge
+	LastAppliedConfigurationKeysAnnotationKey = redpandav1alpha1.GroupVersion.Group + "/last-applied-configuration-keys"
 )
 
 var _ Resource = &ConfigMapResource{}
@@ -173,6 +177,9 @@ func (r *ConfigMapResource) CreateConfiguration(
 ) (*configuration.GlobalConfiguration, error) {
 	cfg := configuration.For(r.pandaCluster.Spec.Version)
 	cfg.NodeConfiguration = *config.Default()
+
+	// TODO remove this (or uncomment to use central config)
+	// cfg.NodeConfiguration.Redpanda.EnableCentralConfig = true
 
 	c := r.pandaCluster.Spec.Configuration
 	cr := &cfg.NodeConfiguration.Redpanda
@@ -637,15 +644,61 @@ func (r *ConfigMapResource) CheckCentralizedConfigurationDrift(
 		}
 		return false, err
 	}
-	oldConfig, err := extractRedpandaConfiguration(&existing)
+	oldConfig, err := extractRedpandaConfiguration(&existing, newConfig.Mode)
 	if err != nil {
 		return false, err
 	}
 	return !reflect.DeepEqual(oldConfig, newConfig), nil
 }
 
+func (r *ConfigMapResource) GetLastUsedConfigurationKeys(
+	ctx context.Context,
+) ([]string, error) {
+	existing := corev1.ConfigMap{}
+	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			// No keys have been used previously
+			return nil, nil
+		}
+		return nil, fmt.Errorf("could not load configmap for checking configuration keys: %w", err)
+	}
+	if ann, ok := existing.Annotations[LastAppliedConfigurationKeysAnnotationKey]; ok {
+		var lst []string
+		if err := json.Unmarshal([]byte(ann), &lst); err != nil {
+			return nil, fmt.Errorf("could not unmarshal configuration keys from configmap annotation %q: %w", LastAppliedConfigurationKeysAnnotationKey, err)
+		}
+		return lst, nil
+	}
+	return nil, nil
+}
+
+func (r *ConfigMapResource) SetLastUsedConfigurationKeys(
+	ctx context.Context,
+	keys []string,
+) error {
+	existing := corev1.ConfigMap{}
+	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			// No place where to store them
+			return nil
+		}
+		return fmt.Errorf("could not load configmap for storing configuration keys: %w", err)
+	}
+	ser, err := json.Marshal(keys)
+	if err != nil {
+		return fmt.Errorf("could not marhsal configuration keys: %w", err)
+	}
+
+	if existing.Annotations == nil {
+		existing.Annotations = make(map[string]string)
+	}
+	existing.Annotations[LastAppliedConfigurationKeysAnnotationKey] = string(ser)
+	return r.Update(ctx, &existing)
+}
+
 func extractRedpandaConfiguration(
 	cm *corev1.ConfigMap,
+	mode configuration.GlobalConfigurationMode,
 ) (*configuration.GlobalConfiguration, error) {
 	ser := configuration.SerializedRedpandaConfiguration{}
 	if d, ok := cm.Data[configKey]; ok {
@@ -654,5 +707,5 @@ func extractRedpandaConfiguration(
 	if d, ok := cm.Data[bootstrapConfigKey]; ok {
 		ser.BootstrapFile = []byte(d)
 	}
-	return ser.Deserialize()
+	return ser.Deserialize(mode)
 }
