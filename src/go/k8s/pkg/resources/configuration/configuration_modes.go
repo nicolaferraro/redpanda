@@ -2,6 +2,7 @@ package configuration
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/spf13/afero"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
@@ -16,6 +17,10 @@ var (
 	GlobalConfigurationModeClassic     GlobalConfigurationMode = globalConfigurationModeClassic{}
 	GlobalConfigurationModeCentralized GlobalConfigurationMode = globalConfigurationModeCentralized{}
 	GlobalConfigurationModeMixed       GlobalConfigurationMode = globalConfigurationModeMixed{}
+)
+
+const (
+	redpandaPropertyPrefix = "redpanda."
 )
 
 // globalConfigurationModeClassic provides classic configuration rules
@@ -80,10 +85,15 @@ func (r globalConfigurationModeCentralized) SetAdditionalFlatProperties(
 ) error {
 	// all unknown properties are cluster properties in the new setting (known ones will be set directly)
 	for key, value := range props {
+		newKey := key
+		if strings.HasPrefix(key, redpandaPropertyPrefix) {
+			// TODO verify if just removing the "redpanda." prefix (if present) is enough for existing clusters
+			newKey = strings.TrimPrefix(key, redpandaPropertyPrefix)
+		}
 		if targetConfig.ClusterConfiguration == nil {
 			targetConfig.ClusterConfiguration = make(map[string]interface{})
 		}
-		targetConfig.ClusterConfiguration[key] = value
+		targetConfig.ClusterConfiguration[newKey] = value
 	}
 	return nil
 }
