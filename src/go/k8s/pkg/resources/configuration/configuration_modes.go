@@ -83,17 +83,22 @@ func (r globalConfigurationModeCentralized) SetAdditionalRedpandaProperty(
 func (r globalConfigurationModeCentralized) SetAdditionalFlatProperties(
 	targetConfig *GlobalConfiguration, props map[string]string,
 ) error {
-	// all unknown properties are cluster properties in the new setting (known ones will be set directly)
+	remaining := make(map[string]string, len(props))
 	for key, value := range props {
-		newKey := key
 		if strings.HasPrefix(key, redpandaPropertyPrefix) {
-			// TODO verify if just removing the "redpanda." prefix (if present) is enough for existing clusters
-			newKey = strings.TrimPrefix(key, redpandaPropertyPrefix)
+			// TODO verify if we can assume that all *additional* properties starting with "redpanda." are central properties
+			// (i.e. we have a CR mapping for all redpanda node properties)
+			newKey := strings.TrimPrefix(key, redpandaPropertyPrefix)
+			if targetConfig.ClusterConfiguration == nil {
+				targetConfig.ClusterConfiguration = make(map[string]interface{})
+			}
+			targetConfig.ClusterConfiguration[newKey] = value
+		} else {
+			remaining[key] = value
 		}
-		if targetConfig.ClusterConfiguration == nil {
-			targetConfig.ClusterConfiguration = make(map[string]interface{})
-		}
-		targetConfig.ClusterConfiguration[newKey] = value
+	}
+	if len(remaining) > 0 {
+		return GlobalConfigurationModeClassic.SetAdditionalFlatProperties(targetConfig, remaining)
 	}
 	return nil
 }
