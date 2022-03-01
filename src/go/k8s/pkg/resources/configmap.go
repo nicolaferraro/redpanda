@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 
 	"github.com/go-logr/logr"
@@ -644,7 +645,7 @@ func (r *ConfigMapResource) CheckCentralizedConfigurationDrift(
 		}
 		return false, err
 	}
-	oldConfig, err := extractRedpandaConfiguration(&existing, newConfig.Mode)
+	oldConfig, err := extractGlobalConfiguration(&existing, newConfig.Mode)
 	if err != nil {
 		return false, err
 	}
@@ -653,23 +654,52 @@ func (r *ConfigMapResource) CheckCentralizedConfigurationDrift(
 
 func (r *ConfigMapResource) GetLastUsedConfigurationKeys(
 	ctx context.Context,
-) ([]string, error) {
+) ([]string, bool, error) {
 	existing := corev1.ConfigMap{}
 	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
 		if apierrors.IsNotFound(err) {
 			// No keys have been used previously
-			return nil, nil
+			return nil, false, nil
 		}
-		return nil, fmt.Errorf("could not load configmap for checking configuration keys: %w", err)
+		return nil, false, fmt.Errorf("could not load configmap for checking configuration keys: %w", err)
 	}
 	if ann, ok := existing.Annotations[LastAppliedConfigurationKeysAnnotationKey]; ok {
 		var lst []string
 		if err := json.Unmarshal([]byte(ann), &lst); err != nil {
-			return nil, fmt.Errorf("could not unmarshal configuration keys from configmap annotation %q: %w", LastAppliedConfigurationKeysAnnotationKey, err)
+			return nil, false, fmt.Errorf("could not unmarshal configuration keys from configmap annotation %q: %w", LastAppliedConfigurationKeysAnnotationKey, err)
 		}
-		return lst, nil
+		return lst, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
+}
+
+func (r *ConfigMapResource) MergeLastUsedConfigurationKeys(
+	ctx context.Context,
+	keys []string,
+) error {
+	curr, _, err := r.GetLastUsedConfigurationKeys(ctx)
+	if err != nil {
+		return err
+	}
+	if (len(curr) == 0 && len(keys) == 0) || reflect.DeepEqual(curr, keys) {
+		return nil
+	}
+	allKeys := make(map[string]bool)
+	for _, k := range curr {
+		allKeys[k] = true
+	}
+	for _, k := range keys {
+		allKeys[k] = true
+	}
+	merged := make([]string, 0, len(allKeys))
+	for k := range allKeys {
+		merged = append(merged, k)
+	}
+	sort.Strings(merged)
+	if reflect.DeepEqual(merged, curr) {
+		return nil
+	}
+	return r.SetLastUsedConfigurationKeys(ctx, merged)
 }
 
 func (r *ConfigMapResource) SetLastUsedConfigurationKeys(
@@ -696,7 +726,22 @@ func (r *ConfigMapResource) SetLastUsedConfigurationKeys(
 	return r.Update(ctx, &existing)
 }
 
-func extractRedpandaConfiguration(
+func (r *ConfigMapResource) GetCurrentGlobalConfigurationFromCluster(
+	ctx context.Context,
+	mode configuration.GlobalConfigurationMode,
+) (*configuration.GlobalConfiguration, error) {
+	cm := corev1.ConfigMap{}
+	if err := r.Client.Get(ctx, r.Key(), &cm); err != nil {
+		if apierrors.IsNotFound(err) {
+			// No keys have been used previously
+			return nil, nil
+		}
+		return nil, fmt.Errorf("could not load configmap for loading current configuration: %w", err)
+	}
+	return extractGlobalConfiguration(&cm, mode)
+}
+
+func extractGlobalConfiguration(
 	cm *corev1.ConfigMap,
 	mode configuration.GlobalConfigurationMode,
 ) (*configuration.GlobalConfiguration, error) {

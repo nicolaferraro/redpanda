@@ -307,7 +307,7 @@ func (s *ClusterStatus) SetCondition(
 		c.Status = status
 		c.Reason = reason
 		c.Message = message
-		if c.Status != status {
+		if c.Status != status || c.Reason != reason || c.Message != message {
 			c.LastTransitionTime = metav1.Now()
 		}
 	}

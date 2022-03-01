@@ -21,21 +21,23 @@ type GlobalConfiguration struct {
 }
 
 func For(version string) *GlobalConfiguration {
-	if version != "" && featuregates.CentralizedConfiguration(version) {
-		// Use mixed config temporarily
-		if useMixedConfiguration {
-			return &GlobalConfiguration{
-				Mode: GlobalConfigurationModeMixed,
-			}
-		}
+	if featuregates.CentralizedConfiguration(version) {
 		return &GlobalConfiguration{
-			Mode: GlobalConfigurationModeCentralized,
+			Mode: DefaultCentralizedMode(),
 		}
 	}
 	// Use classic also when version is not present for some reason
 	return &GlobalConfiguration{
 		Mode: GlobalConfigurationModeClassic,
 	}
+}
+
+func DefaultCentralizedMode() GlobalConfigurationMode {
+	// Use mixed config temporarily
+	if useMixedConfiguration {
+		return GlobalConfigurationModeMixed
+	}
+	return GlobalConfigurationModeCentralized
 }
 
 func (c *GlobalConfiguration) SetAdditionalRedpandaProperty(

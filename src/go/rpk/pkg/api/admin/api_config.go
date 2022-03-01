@@ -36,20 +36,6 @@ func (a *AdminAPI) Config() (Config, error) {
 	return unmarshaled, nil
 }
 
-// ClusterConfig -- todo
-func (a *AdminAPI) ClusterConfig() (Config, error) {
-	var rawResp []byte
-	err := a.sendAny(http.MethodGet, "/v1/cluster_config", nil, &rawResp)
-	if err != nil {
-		return nil, err
-	}
-	var unmarshaled Config
-	if err := json.Unmarshal(rawResp, &unmarshaled); err != nil {
-		return nil, fmt.Errorf("unable to decode response body: %w", err)
-	}
-	return unmarshaled, nil
-}
-
 // SetLogLevel sets the logger level for the logger `name` to the given level
 // for the single admin host in this client. This function will return an error
 // if the client has multiple URLs configured.
