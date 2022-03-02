@@ -11,7 +11,6 @@
 package redpanda
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -46,29 +45,11 @@ var (
 // ClusterReconciler reconciles a Cluster object
 type ClusterReconciler struct {
 	client.Client
-	Log                  logr.Logger
-	configuratorSettings resources.ConfiguratorSettings
-	clusterDomain        string
-	Scheme               *runtime.Scheme
-}
-
-type configurationPatch struct {
-	upsert map[string]interface{}
-	remove []string
-}
-
-func (p configurationPatch) String() string {
-	var buffer bytes.Buffer
-	var sep = ""
-	for k, v := range p.upsert {
-		fmt.Fprint(&buffer, fmt.Sprintf("%s%s=%v", sep, k, v))
-		sep = " "
-	}
-	for _, r := range p.remove {
-		fmt.Fprint(&buffer, fmt.Sprintf("%s-%s", sep, r))
-		sep = " "
-	}
-	return buffer.String()
+	Log                   logr.Logger
+	configuratorSettings  resources.ConfiguratorSettings
+	clusterDomain         string
+	Scheme                *runtime.Scheme
+	AdminAPIClientFactory utils.AdminAPIClientFactory
 }
 
 //+kubebuilder:rbac:groups=redpanda.vectorized.io,resources=clusters,verbs=get;list;watch;create;update;patch;delete
@@ -537,9 +518,8 @@ func (r *ClusterReconciler) setInitialSuperUserPassword(
 	fqdn string,
 	objs []types.NamespacedName,
 ) error {
-	adminAPI, err := utils.NewInternalAdminAPI(redpandaCluster, fqdn)
+	adminAPI, err := r.getAdminAPIClient(redpandaCluster, fqdn)
 	if err != nil && errors.Is(err, &utils.NoInternalAdminAPI{}) {
-		// TODO maybe this is not equivalent to previous behavior
 		return nil
 	} else if err != nil {
 		return err
@@ -568,6 +548,13 @@ func (r *ClusterReconciler) setInitialSuperUserPassword(
 		}
 	}
 	return nil
+}
+
+func (r *ClusterReconciler) getAdminAPIClient(redpandaCluster *redpandav1alpha1.Cluster, fqdn string) (utils.AdminAPIClient, error) {
+	if r.AdminAPIClientFactory != nil {
+		return r.AdminAPIClientFactory(redpandaCluster, fqdn)
+	}
+	return utils.NewInternalAdminAPI(redpandaCluster, fqdn)
 }
 
 func needExternalIP(external redpandav1alpha1.ExternalConnectivityConfig) bool {

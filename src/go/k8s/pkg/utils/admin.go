@@ -13,12 +13,10 @@ func (n *NoInternalAdminAPI) Error() string {
 	return "no internal admin API defined for cluster"
 }
 
-var _ error = &NoInternalAdminAPI{}
-
 func NewInternalAdminAPI(
 	redpandaCluster *redpandav1alpha1.Cluster,
 	fqdn string,
-) (*admin.AdminAPI, error) {
+) (AdminAPIClient, error) {
 	adminInternal := redpandaCluster.AdminAPIInternal()
 	if adminInternal == nil {
 		return nil, &NoInternalAdminAPI{}
@@ -39,3 +37,19 @@ func NewInternalAdminAPI(
 	}
 	return adminAPI, nil
 }
+
+// AdminAPIClient is a sub interface of the admin API containing what we need in the operator
+type AdminAPIClient interface {
+	Config() (admin.Config, error)
+	ClusterConfigStatus() (admin.ConfigStatusResponse, error)
+	ClusterConfigSchema() (admin.ConfigSchema, error)
+	PatchClusterConfig(upsert map[string]interface{}, remove []string) (admin.ClusterConfigWriteResult, error)
+
+	CreateUser(username, password, mechanism string) error
+}
+
+var _ AdminAPIClient = &admin.AdminAPI{}
+
+type AdminAPIClientFactory func(redpandaCluster *redpandav1alpha1.Cluster, fqdn string) (AdminAPIClient, error)
+
+var _ AdminAPIClientFactory = NewInternalAdminAPI

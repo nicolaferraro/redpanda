@@ -43,35 +43,33 @@ func (c *Config) File() *Config {
 }
 
 type RedpandaConfig struct {
-	Directory                            string               `yaml:"data_directory" mapstructure:"data_directory" json:"dataDirectory"`
-	RPCServer                            SocketAddress        `yaml:"rpc_server" mapstructure:"rpc_server" json:"rpcServer"`
-	AdvertisedRPCAPI                     *SocketAddress       `yaml:"advertised_rpc_api,omitempty" mapstructure:"advertised_rpc_api,omitempty" json:"advertisedRpcApi,omitempty"`
-	KafkaApi                             []NamedSocketAddress `yaml:"kafka_api" mapstructure:"kafka_api" json:"kafkaApi"`
-	AdvertisedKafkaApi                   []NamedSocketAddress `yaml:"advertised_kafka_api,omitempty" mapstructure:"advertised_kafka_api,omitempty" json:"advertisedKafkaApi,omitempty"`
-	KafkaApiTLS                          []ServerTLS          `yaml:"kafka_api_tls,omitempty" mapstructure:"kafka_api_tls,omitempty" json:"kafkaApiTls"`
-	AdminApi                             []NamedSocketAddress `yaml:"admin" mapstructure:"admin" json:"admin"`
-	AdminApiTLS                          []ServerTLS          `yaml:"admin_api_tls,omitempty" mapstructure:"admin_api_tls,omitempty" json:"adminApiTls"`
-	Id                                   int                  `yaml:"node_id" mapstructure:"node_id" json:"id"`
-	SeedServers                          []SeedServer         `yaml:"seed_servers" mapstructure:"seed_servers" json:"seedServers"`
-	DeveloperMode                        bool                 `yaml:"developer_mode" mapstructure:"developer_mode" json:"developerMode"`
-	CloudStorageApiEndpoint              *string              `yaml:"cloud_storage_api_endpoint,omitempty" mapstructure:"cloud_storage_api_endpoint,omitempty" json:"cloudStorageApiEndpoint,omitempty"`
-	CloudStorageEnabled                  *bool                `yaml:"cloud_storage_enabled,omitempty" mapstructure:"cloud_storage_enabled,omitempty" json:"cloudStorageEnabled,omitempty"`
-	CloudStorageAccessKey                *string              `yaml:"cloud_storage_access_key,omitempty" mapstructure:"cloud_storage_access_key,omitempty" json:"cloudStorageAccessKey,omitempty"`
-	CloudStorageSecretKey                *string              `yaml:"cloud_storage_secret_key,omitempty" mapstructure:"cloud_storage_secret_key,omitempty" json:"cloudStorageSecretKey,omitempty"`
-	CloudStorageRegion                   *string              `yaml:"cloud_storage_region,omitempty" mapstructure:"cloud_storage_region,omitempty" json:"cloudStorageRegion,omitempty"`
-	CloudStorageBucket                   *string              `yaml:"cloud_storage_bucket,omitempty" mapstructure:"cloud_storage_bucket,omitempty" json:"cloudStorageBucket,omitempty"`
-	CloudStorageReconciliationIntervalMs *int                 `yaml:"cloud_storage_reconciliation_interval_ms,omitempty" mapstructure:"cloud_storage_reconciliation_interval_ms,omitempty" json:"cloudStorageReconciliationIntervalMs,omitempty"`
-	CloudStorageMaxConnections           *int                 `yaml:"cloud_storage_max_connections,omitempty" mapstructure:"cloud_storage_max_connections,omitempty" json:"cloudStorageMaxConnections,omitempty"`
-	CloudStorageDisableTls               *bool                `yaml:"cloud_storage_disable_tls,omitempty" mapstructure:"cloud_storage_disable_tls,omitempty" json:"cloudStorageDisableTls,omitempty"`
-	CloudStorageApiEndpointPort          *int                 `yaml:"cloud_storage_api_endpoint_port,omitempty" mapstructure:"cloud_storage_api_endpoint_port,omitempty" json:"cloudStorageApiEndpointPort,omitempty"`
-	CloudStorageTrustFile                *string              `yaml:"cloud_storage_trust_file,omitempty" mapstructure:"cloud_storage_trust_file,omitempty" json:"cloudStorageTrustFile,omitempty"`
-	Superusers                           []string             `yaml:"superusers,omitempty" mapstructure:"superusers,omitempty" json:"superusers,omitempty"`
-	EnableSASL                           *bool                `yaml:"enable_sasl,omitempty" mapstructure:"enable_sasl,omitempty" json:"enableSasl,omitempty"`
-	GroupTopicPartitions                 *int                 `yaml:"group_topic_partitions,omitempty" mapstructure:"group_topic_partitions,omitempty" json:"groupTopicPartitions,omitempty"`
-	LogSegmentSize                       *int                 `yaml:"log_segment_size,omitempty" mapstructure:"log_segment_size,omitempty" json:"log_segment_size,omitempty"`
-	// TODO remove this
-	EnableCentralConfig bool                   `yaml:"enable_central_config,omitempty" mapstructure:"enable_central_config,omitempty" json:"enableCentralConfig,omitempty"`
-	Other               map[string]interface{} `yaml:",inline" mapstructure:",remain"`
+	Directory                            string                 `yaml:"data_directory" mapstructure:"data_directory" json:"dataDirectory"`
+	RPCServer                            SocketAddress          `yaml:"rpc_server" mapstructure:"rpc_server" json:"rpcServer"`
+	AdvertisedRPCAPI                     *SocketAddress         `yaml:"advertised_rpc_api,omitempty" mapstructure:"advertised_rpc_api,omitempty" json:"advertisedRpcApi,omitempty"`
+	KafkaApi                             []NamedSocketAddress   `yaml:"kafka_api" mapstructure:"kafka_api" json:"kafkaApi"`
+	AdvertisedKafkaApi                   []NamedSocketAddress   `yaml:"advertised_kafka_api,omitempty" mapstructure:"advertised_kafka_api,omitempty" json:"advertisedKafkaApi,omitempty"`
+	KafkaApiTLS                          []ServerTLS            `yaml:"kafka_api_tls,omitempty" mapstructure:"kafka_api_tls,omitempty" json:"kafkaApiTls"`
+	AdminApi                             []NamedSocketAddress   `yaml:"admin" mapstructure:"admin" json:"admin"`
+	AdminApiTLS                          []ServerTLS            `yaml:"admin_api_tls,omitempty" mapstructure:"admin_api_tls,omitempty" json:"adminApiTls"`
+	Id                                   int                    `yaml:"node_id" mapstructure:"node_id" json:"id"`
+	SeedServers                          []SeedServer           `yaml:"seed_servers" mapstructure:"seed_servers" json:"seedServers"`
+	DeveloperMode                        bool                   `yaml:"developer_mode" mapstructure:"developer_mode" json:"developerMode"`
+	CloudStorageApiEndpoint              *string                `yaml:"cloud_storage_api_endpoint,omitempty" mapstructure:"cloud_storage_api_endpoint,omitempty" json:"cloudStorageApiEndpoint,omitempty"`
+	CloudStorageEnabled                  *bool                  `yaml:"cloud_storage_enabled,omitempty" mapstructure:"cloud_storage_enabled,omitempty" json:"cloudStorageEnabled,omitempty"`
+	CloudStorageAccessKey                *string                `yaml:"cloud_storage_access_key,omitempty" mapstructure:"cloud_storage_access_key,omitempty" json:"cloudStorageAccessKey,omitempty"`
+	CloudStorageSecretKey                *string                `yaml:"cloud_storage_secret_key,omitempty" mapstructure:"cloud_storage_secret_key,omitempty" json:"cloudStorageSecretKey,omitempty"`
+	CloudStorageRegion                   *string                `yaml:"cloud_storage_region,omitempty" mapstructure:"cloud_storage_region,omitempty" json:"cloudStorageRegion,omitempty"`
+	CloudStorageBucket                   *string                `yaml:"cloud_storage_bucket,omitempty" mapstructure:"cloud_storage_bucket,omitempty" json:"cloudStorageBucket,omitempty"`
+	CloudStorageReconciliationIntervalMs *int                   `yaml:"cloud_storage_reconciliation_interval_ms,omitempty" mapstructure:"cloud_storage_reconciliation_interval_ms,omitempty" json:"cloudStorageReconciliationIntervalMs,omitempty"`
+	CloudStorageMaxConnections           *int                   `yaml:"cloud_storage_max_connections,omitempty" mapstructure:"cloud_storage_max_connections,omitempty" json:"cloudStorageMaxConnections,omitempty"`
+	CloudStorageDisableTls               *bool                  `yaml:"cloud_storage_disable_tls,omitempty" mapstructure:"cloud_storage_disable_tls,omitempty" json:"cloudStorageDisableTls,omitempty"`
+	CloudStorageApiEndpointPort          *int                   `yaml:"cloud_storage_api_endpoint_port,omitempty" mapstructure:"cloud_storage_api_endpoint_port,omitempty" json:"cloudStorageApiEndpointPort,omitempty"`
+	CloudStorageTrustFile                *string                `yaml:"cloud_storage_trust_file,omitempty" mapstructure:"cloud_storage_trust_file,omitempty" json:"cloudStorageTrustFile,omitempty"`
+	Superusers                           []string               `yaml:"superusers,omitempty" mapstructure:"superusers,omitempty" json:"superusers,omitempty"`
+	EnableSASL                           *bool                  `yaml:"enable_sasl,omitempty" mapstructure:"enable_sasl,omitempty" json:"enableSasl,omitempty"`
+	GroupTopicPartitions                 *int                   `yaml:"group_topic_partitions,omitempty" mapstructure:"group_topic_partitions,omitempty" json:"groupTopicPartitions,omitempty"`
+	LogSegmentSize                       *int                   `yaml:"log_segment_size,omitempty" mapstructure:"log_segment_size,omitempty" json:"log_segment_size,omitempty"`
+	Other                                map[string]interface{} `yaml:",inline" mapstructure:",remain"`
 }
 
 type Pandaproxy struct {

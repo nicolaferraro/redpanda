@@ -33,21 +33,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+const (
+	timeout  = time.Second * 30
+	interval = time.Second * 1
+
+	adminPort                 = 9644
+	kafkaPort                 = 9092
+	pandaProxyPort            = 8082
+	schemaRegistryPort        = 8081
+	redpandaConfigurationFile = "redpanda.yaml"
+	replicas                  = 1
+	redpandaContainerTag      = "x"
+	redpandaContainerImage    = "vectorized/redpanda"
+)
+
 var _ = Describe("RedPandaCluster controller", func() {
-
-	const (
-		timeout  = time.Second * 30
-		interval = time.Second * 1
-
-		adminPort                 = 9644
-		kafkaPort                 = 9092
-		pandaProxyPort            = 8082
-		schemaRegistryPort        = 8081
-		redpandaConfigurationFile = "redpanda.yaml"
-		replicas                  = 1
-		redpandaContainerTag      = "x"
-		redpandaContainerImage    = "vectorized/redpanda"
-	)
 
 	Context("When creating RedpandaCluster", func() {
 		It("Should create Redpanda cluster with corresponding resources", func() {

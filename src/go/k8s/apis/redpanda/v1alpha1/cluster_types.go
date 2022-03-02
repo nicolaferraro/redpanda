@@ -303,13 +303,13 @@ func (s *ClusterStatus) SetCondition(
 	reason, message string,
 ) {
 	update := func(c *ClusterCondition) {
+		if c.Status != status || c.Reason != reason || c.Message != message {
+			c.LastTransitionTime = metav1.Now()
+		}
 		c.Type = cType
 		c.Status = status
 		c.Reason = reason
 		c.Message = message
-		if c.Status != status || c.Reason != reason || c.Message != message {
-			c.LastTransitionTime = metav1.Now()
-		}
 	}
 	// Try updating existing condition
 	for i := range s.Conditions {

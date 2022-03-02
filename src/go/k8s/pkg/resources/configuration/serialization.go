@@ -6,16 +6,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type SerializedRedpandaConfiguration struct {
+type SerializedGlobalConfigurationContainer struct {
 	RedpandaFile  []byte
 	BootstrapFile []byte
 }
 
 func (c *GlobalConfiguration) Serialize() (
-	*SerializedRedpandaConfiguration,
+	*SerializedGlobalConfigurationContainer,
 	error,
 ) {
-	res := SerializedRedpandaConfiguration{}
+	res := SerializedGlobalConfigurationContainer{}
 
 	rpConfig, err := yaml.Marshal(c.NodeConfiguration)
 	if err != nil {
@@ -33,7 +33,7 @@ func (c *GlobalConfiguration) Serialize() (
 	return &res, nil
 }
 
-func (s *SerializedRedpandaConfiguration) Deserialize(
+func (s *SerializedGlobalConfigurationContainer) Deserialize(
 	mode GlobalConfigurationMode,
 ) (*GlobalConfiguration, error) {
 	res := GlobalConfiguration{}

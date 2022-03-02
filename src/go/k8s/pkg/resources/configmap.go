@@ -738,7 +738,7 @@ func (r *ConfigMapResource) GetCurrentGlobalConfigurationFromCluster(
 func extractGlobalConfiguration(
 	cm *corev1.ConfigMap, mode configuration.GlobalConfigurationMode,
 ) (*configuration.GlobalConfiguration, error) {
-	ser := configuration.SerializedRedpandaConfiguration{}
+	ser := configuration.SerializedGlobalConfigurationContainer{}
 	if d, ok := cm.Data[configKey]; ok {
 		ser.RedpandaFile = []byte(d)
 	}

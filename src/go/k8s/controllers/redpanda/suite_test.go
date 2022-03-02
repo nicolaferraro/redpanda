@@ -21,6 +21,8 @@ import (
 	redpandav1alpha1 "github.com/vectorizedio/redpanda/src/go/k8s/apis/redpanda/v1alpha1"
 	redpandacontrollers "github.com/vectorizedio/redpanda/src/go/k8s/controllers/redpanda"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources"
+	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
+	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/api/admin"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -37,6 +39,7 @@ import (
 var k8sClient client.Client
 var testEnv *envtest.Environment
 var cfg *rest.Config
+var testAdminAPI *mockAdminAPI
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -73,10 +76,14 @@ var _ = BeforeSuite(func(done Done) {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
+	testAdminAPI = &mockAdminAPI{}
+	fakeAdminAPIFactory := func(_ *redpandav1alpha1.Cluster, _ string) (utils.AdminAPIClient, error) { return testAdminAPI, nil }
+
 	err = (&redpandacontrollers.ClusterReconciler{
-		Client: k8sManager.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("core").WithName("RedpandaCluster"),
-		Scheme: k8sManager.GetScheme(),
+		Client:                k8sManager.GetClient(),
+		Log:                   ctrl.Log.WithName("controllers").WithName("core").WithName("RedpandaCluster"),
+		Scheme:                k8sManager.GetScheme(),
+		AdminAPIClientFactory: fakeAdminAPIFactory,
 	}).WithClusterDomain("cluster.local").WithConfiguratorSettings(resources.ConfiguratorSettings{
 		ConfiguratorBaseImage: "vectorized/configurator",
 		ConfiguratorTag:       "latest",
@@ -101,3 +108,38 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
+
+type mockAdminAPI struct {
+	config admin.Config
+}
+
+var _ utils.AdminAPIClient = &mockAdminAPI{}
+
+func (m *mockAdminAPI) Config() (admin.Config, error) {
+	return m.config, nil
+}
+
+func (m *mockAdminAPI) ClusterConfigStatus() (admin.ConfigStatusResponse, error) {
+	return admin.ConfigStatusResponse{}, nil
+}
+
+func (m *mockAdminAPI) ClusterConfigSchema() (admin.ConfigSchema, error) {
+	return nil, nil
+}
+
+func (m *mockAdminAPI) PatchClusterConfig(upsert map[string]interface{}, remove []string) (admin.ClusterConfigWriteResult, error) {
+	if m.config == nil {
+		m.config = make(map[string]interface{})
+	}
+	for k, v := range upsert {
+		m.config[k] = v
+	}
+	for _, k := range remove {
+		delete(m.config, k)
+	}
+	return admin.ClusterConfigWriteResult{}, nil
+}
+
+func (m *mockAdminAPI) CreateUser(_, _, _ string) error {
+	return nil
+}

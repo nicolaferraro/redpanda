@@ -11,7 +11,6 @@ import (
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/configuration"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
-	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/api/admin"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -112,7 +111,7 @@ func (r *ClusterReconciler) syncConfiguration(
 	}
 	// TODO wait for the service to be ready before connecting to the admin API
 
-	adminAPI, err := utils.NewInternalAdminAPI(redpandaCluster, fqdn)
+	adminAPI, err := r.getAdminAPIClient(redpandaCluster, fqdn)
 	if err != nil {
 		return fmt.Errorf("error connecting to the admin API of cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
 	}
@@ -130,10 +129,10 @@ func (r *ClusterReconciler) syncConfiguration(
 		return err
 	}
 
-	patch := computePatch(config.ClusterConfiguration, clusterConfig, lastUsedKeys)
-	if len(patch.upsert) > 0 || len(patch.remove) > 0 {
-		log.Info("Applying patch to the cluster", "patch", patch)
-		_, err := adminAPI.PatchClusterConfig(patch.upsert, patch.remove)
+	patch := configuration.ComputePatch(config.ClusterConfiguration, clusterConfig, lastUsedKeys)
+	if !patch.Empty() {
+		log.Info("Applying patch to the cluster", "patch", patch.String())
+		_, err := adminAPI.PatchClusterConfig(patch.Upsert, patch.Remove)
 		if err != nil {
 			return fmt.Errorf("could not patch centralized configuration on cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
 		}
@@ -245,35 +244,6 @@ func mapToCondition(
 		}
 	}
 	return *condition
-}
-
-func computePatch(
-	current, old map[string]interface{}, lastUsedKeys []string,
-) configurationPatch {
-	patch := configurationPatch{
-		// Initialize them early since nil values are rejected by the server
-		upsert: make(map[string]interface{}),
-		remove: make([]string, 0),
-	}
-	for k, v := range current {
-		if oldValue, ok := old[k]; !ok || !valueEquals(v, oldValue) {
-			patch.upsert[k] = v
-		}
-	}
-	for _, k := range lastUsedKeys {
-		if _, ok := current[k]; !ok {
-			patch.remove = append(patch.remove, k)
-		}
-	}
-	return patch
-}
-
-func valueEquals(v1, v2 interface{}) bool {
-	// TODO verify if there's a better way
-	// Problems are e.g. when unmarshalled from JSON, numeric values become float64, while they are int when computed
-	sv1 := fmt.Sprintf("%v", v1)
-	sv2 := fmt.Sprintf("%v", v2)
-	return sv1 == sv2
 }
 
 func filterRestartKeys(
