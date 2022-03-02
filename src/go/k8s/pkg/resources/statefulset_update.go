@@ -387,9 +387,6 @@ func (r *StatefulSetResource) queryRedpandaStatus(
 ) error {
 	client := &http.Client{Timeout: adminAPITimeout}
 
-	// TODO
-	return nil
-
 	// TODO right now we support TLS only on one listener so if external
 	// connectivity is enabled, TLS is enabled only on external listener. This
 	// will be fixed by https://github.com/vectorizedio/redpanda/issues/1084

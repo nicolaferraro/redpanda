@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: centralized-configuration-base
+  namespace: default
+data:
+  bootstrap.yaml: |
+    auto_create_topics_enabled: false
+    cloud_storage_segment_max_upload_interval_sec: 1800
+    enable_idempotence: true
+    enable_transactions: true

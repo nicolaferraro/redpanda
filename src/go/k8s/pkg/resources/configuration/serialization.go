@@ -33,10 +33,9 @@ func (c *GlobalConfiguration) Serialize() (
 	return &res, nil
 }
 
-func (s *SerializedRedpandaConfiguration) Deserialize(mode GlobalConfigurationMode) (
-	*GlobalConfiguration,
-	error,
-) {
+func (s *SerializedRedpandaConfiguration) Deserialize(
+	mode GlobalConfigurationMode,
+) (*GlobalConfiguration, error) {
 	res := GlobalConfiguration{}
 	if s.RedpandaFile != nil {
 		if err := yaml.Unmarshal(s.RedpandaFile, &res.NodeConfiguration); err != nil {

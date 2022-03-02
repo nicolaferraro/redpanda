@@ -52,7 +52,9 @@ func (c *GlobalConfiguration) SetAdditionalFlatProperties(
 	return c.Mode.SetAdditionalFlatProperties(c, props)
 }
 
-func (c *GlobalConfiguration) GetHash(filterClusterProps map[string]bool) (string, error) {
+func (c *GlobalConfiguration) GetHash(
+	filterClusterProps map[string]bool,
+) (string, error) {
 	clone := *c
 	clone.ClusterConfiguration = make(map[string]interface{})
 	for k, v := range c.ClusterConfiguration {

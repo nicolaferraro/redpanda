@@ -19,6 +19,12 @@ var (
 	GlobalConfigurationModeMixed       GlobalConfigurationMode = globalConfigurationModeMixed{}
 )
 
+// We put here well known node properties from the "redpanda" configuration tree.
+// To avoid this, we may think adding an "additionalNodeProperty" option to the CR.
+var wellKnownNodeProperties = map[string]bool{
+	"redpanda.enable_central_config": true, // deprecated
+}
+
 const (
 	redpandaPropertyPrefix = "redpanda."
 )
@@ -85,9 +91,7 @@ func (r globalConfigurationModeCentralized) SetAdditionalFlatProperties(
 ) error {
 	remaining := make(map[string]string, len(props))
 	for key, value := range props {
-		if strings.HasPrefix(key, redpandaPropertyPrefix) {
-			// TODO verify if we can assume that all *additional* properties starting with "redpanda." are central properties
-			// (i.e. we have a CR mapping for all redpanda node properties)
+		if _, nodeProp := wellKnownNodeProperties[key]; !nodeProp && strings.HasPrefix(key, redpandaPropertyPrefix) {
 			newKey := strings.TrimPrefix(key, redpandaPropertyPrefix)
 			if targetConfig.ClusterConfiguration == nil {
 				targetConfig.ClusterConfiguration = make(map[string]interface{})

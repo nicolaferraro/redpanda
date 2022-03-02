@@ -66,7 +66,7 @@ const (
 	saslMechanism = "SCRAM-SHA-256"
 
 	configKey          = "redpanda.yaml"
-	bootstrapConfigKey = ".bootstrap.yaml"
+	bootstrapConfigKey = "bootstrap.yaml"
 )
 
 var (
@@ -178,9 +178,6 @@ func (r *ConfigMapResource) CreateConfiguration(
 ) (*configuration.GlobalConfiguration, error) {
 	cfg := configuration.For(r.pandaCluster.Spec.Version)
 	cfg.NodeConfiguration = *config.Default()
-
-	// TODO remove this (or uncomment to use central config)
-	// cfg.NodeConfiguration.Redpanda.EnableCentralConfig = true
 
 	c := r.pandaCluster.Spec.Configuration
 	cr := &cfg.NodeConfiguration.Redpanda
@@ -674,8 +671,7 @@ func (r *ConfigMapResource) GetLastUsedConfigurationKeys(
 }
 
 func (r *ConfigMapResource) MergeLastUsedConfigurationKeys(
-	ctx context.Context,
-	keys []string,
+	ctx context.Context, keys []string,
 ) error {
 	curr, _, err := r.GetLastUsedConfigurationKeys(ctx)
 	if err != nil {
@@ -703,8 +699,7 @@ func (r *ConfigMapResource) MergeLastUsedConfigurationKeys(
 }
 
 func (r *ConfigMapResource) SetLastUsedConfigurationKeys(
-	ctx context.Context,
-	keys []string,
+	ctx context.Context, keys []string,
 ) error {
 	existing := corev1.ConfigMap{}
 	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
@@ -727,8 +722,7 @@ func (r *ConfigMapResource) SetLastUsedConfigurationKeys(
 }
 
 func (r *ConfigMapResource) GetCurrentGlobalConfigurationFromCluster(
-	ctx context.Context,
-	mode configuration.GlobalConfigurationMode,
+	ctx context.Context, mode configuration.GlobalConfigurationMode,
 ) (*configuration.GlobalConfiguration, error) {
 	cm := corev1.ConfigMap{}
 	if err := r.Client.Get(ctx, r.Key(), &cm); err != nil {
@@ -742,8 +736,7 @@ func (r *ConfigMapResource) GetCurrentGlobalConfigurationFromCluster(
 }
 
 func extractGlobalConfiguration(
-	cm *corev1.ConfigMap,
-	mode configuration.GlobalConfigurationMode,
+	cm *corev1.ConfigMap, mode configuration.GlobalConfigurationMode,
 ) (*configuration.GlobalConfiguration, error) {
 	ser := configuration.SerializedRedpandaConfiguration{}
 	if d, ok := cm.Data[configKey]; ok {

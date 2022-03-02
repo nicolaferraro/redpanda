@@ -15,6 +15,8 @@ commands:
   - command: "make deploy"
   - command: "./hack/wait-for-webhook-ready.sh"
   - command: "mkdir -p tests/_e2e_artifacts"
+  - command: "docker tag localhost/redpanda:dev vectorized/redpanda:v22.1.1-dev"
+  - command: "kind load docker-image vectorized/redpanda:v22.1.1-dev"
 artifactsDir: tests/_e2e_artifacts
 timeout: 300
 reportFormat: xml

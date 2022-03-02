@@ -76,7 +76,13 @@ func (r *ClusterReconciler) markConfigurationChanged(
 }
 
 // syncConfiguration ensures that the cluster configuration is synchronized with expected data
-func (r *ClusterReconciler) syncConfiguration(ctx context.Context, redpandaCluster *redpandav1alpha1.Cluster, configMapResource *resources.ConfigMapResource, fqdn string, log logr.Logger) error {
+func (r *ClusterReconciler) syncConfiguration(
+	ctx context.Context,
+	redpandaCluster *redpandav1alpha1.Cluster,
+	configMapResource *resources.ConfigMapResource,
+	fqdn string,
+	log logr.Logger,
+) error {
 	if !featuregates.CentralizedConfiguration(redpandaCluster.Spec.Version) {
 		log.Info("Cluster is not using centralized configuration, skipping...")
 		return nil
@@ -192,7 +198,9 @@ func (r *ClusterReconciler) syncConfiguration(ctx context.Context, redpandaClust
 	return nil
 }
 
-func mapToCondition(clusterStatus admin.ConfigStatusResponse) redpandav1alpha1.ClusterCondition {
+func mapToCondition(
+	clusterStatus admin.ConfigStatusResponse,
+) redpandav1alpha1.ClusterCondition {
 	var condition *redpandav1alpha1.ClusterCondition
 	var configVersion int64
 	for _, nodeStatus := range clusterStatus {
@@ -239,7 +247,9 @@ func mapToCondition(clusterStatus admin.ConfigStatusResponse) redpandav1alpha1.C
 	return *condition
 }
 
-func computePatch(current, old map[string]interface{}, lastUsedKeys []string) configurationPatch {
+func computePatch(
+	current, old map[string]interface{}, lastUsedKeys []string,
+) configurationPatch {
 	patch := configurationPatch{
 		// Initialize them early since nil values are rejected by the server
 		upsert: make(map[string]interface{}),
@@ -266,7 +276,9 @@ func valueEquals(v1, v2 interface{}) bool {
 	return sv1 == sv2
 }
 
-func filterRestartKeys(schema admin.ConfigSchema, config map[string]interface{}) map[string]bool {
+func filterRestartKeys(
+	schema admin.ConfigSchema, config map[string]interface{},
+) map[string]bool {
 	filter := make(map[string]bool, len(config))
 	for k := range config {
 		if s, ok := schema[k]; ok {

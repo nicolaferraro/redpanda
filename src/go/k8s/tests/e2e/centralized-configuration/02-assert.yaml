@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: centralized-configuration-base
+  namespace: default
+  annotations:
+    redpanda.vectorized.io/last-applied-configuration-keys: '["auto_create_topics_enabled","cloud_storage_segment_max_upload_interval_sec","enable_idempotence","enable_transactions","segment_appender_flush_timeout_ms"]'
+data:
+  # TODO check numeric values
+  bootstrap.yaml: |
+    auto_create_topics_enabled: false
+    cloud_storage_segment_max_upload_interval_sec: 1800
+    enable_idempotence: true
+    enable_transactions: true
+    segment_appender_flush_timeout_ms: "1003"
