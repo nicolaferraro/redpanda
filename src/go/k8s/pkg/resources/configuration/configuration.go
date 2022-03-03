@@ -3,9 +3,9 @@ package configuration
 import (
 	"crypto/md5"
 	"fmt"
-	"sort"
 
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
+	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/api/admin"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/config"
 )
 
@@ -52,14 +52,26 @@ func (c *GlobalConfiguration) SetAdditionalFlatProperties(
 	return c.Mode.SetAdditionalFlatProperties(c, props)
 }
 
+// GetHash computes a hash of the configuration considering all node properties and only the cluster properties
+// that require a restart (this is why the schema is needed).
 func (c *GlobalConfiguration) GetHash(
-	filterClusterProps map[string]bool,
+	schema admin.ConfigSchema,
 ) (string, error) {
 	clone := *c
+
+	// Ignore cluster properties that don't need restart
 	clone.ClusterConfiguration = make(map[string]interface{})
 	for k, v := range c.ClusterConfiguration {
-		if p, ok := filterClusterProps[k]; ok && p {
+		if meta, ok := schema[k]; ok && meta.NeedsRestart {
 			clone.ClusterConfiguration[k] = v
+		}
+	}
+
+	// Ignore redpanda additional properties that don't need restart
+	clone.NodeConfiguration.Redpanda.Other = make(map[string]interface{})
+	for k, v := range c.NodeConfiguration.Redpanda.Other {
+		if meta, ok := schema[k]; ok && meta.NeedsRestart {
+			clone.NodeConfiguration.Redpanda.Other[k] = v
 		}
 	}
 
@@ -73,13 +85,4 @@ func (c *GlobalConfiguration) GetHash(
 
 	md5Hash := md5.Sum(full) // nolint:gosec // this is not encrypting secure info
 	return fmt.Sprintf("%x", md5Hash), nil
-}
-
-func (c *GlobalConfiguration) GetClusterConfigurationKeys() []string {
-	keys := make([]string, 0, len(c.ClusterConfiguration))
-	for k := range c.ClusterConfiguration {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

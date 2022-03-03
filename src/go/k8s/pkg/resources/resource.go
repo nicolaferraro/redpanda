@@ -128,7 +128,7 @@ func Update(
 		patch.IgnoreStatusFields(),
 		patch.IgnoreVolumeClaimTemplateTypeMetaAndStatus(),
 		patch.IgnorePDBSelector(),
-		utils.IgnoreAnnotation(LastAppliedConfigurationKeysAnnotationKey),
+		utils.IgnoreAnnotation(LastAppliedConfigurationAnnotationKey),
 	}
 	patchResult, err := patch.DefaultPatchMaker.Calculate(current, modified, opts...)
 	if err != nil {
@@ -189,7 +189,7 @@ func prepareResourceForUpdate(current runtime.Object, modified client.Object) {
 			cm.Annotations = make(map[string]string)
 		}
 		// We always ignore this annotation during normal reconciliation
-		cm.Annotations[LastAppliedConfigurationKeysAnnotationKey] = current.(*corev1.ConfigMap).Annotations[LastAppliedConfigurationKeysAnnotationKey]
+		cm.Annotations[LastAppliedConfigurationAnnotationKey] = current.(*corev1.ConfigMap).Annotations[LastAppliedConfigurationAnnotationKey]
 	}
 }
 

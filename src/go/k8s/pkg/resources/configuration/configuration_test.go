@@ -53,20 +53,3 @@ func TestFlatProperties(t *testing.T) {
 	assert.Equal(t, "b", config.NodeConfiguration.Redpanda.Other["a"])
 	assert.Equal(t, "b", config.ClusterConfiguration["a"])
 }
-
-func TestClusterConfigurationKeys(t *testing.T) {
-	config := GlobalConfiguration{Mode: GlobalConfigurationModeCentralized}
-	config.SetAdditionalRedpandaProperty("b", "c")
-	config.SetAdditionalRedpandaProperty("a", "b")
-	assert.Equal(t, []string{"a", "b"}, config.GetClusterConfigurationKeys())
-
-	config = GlobalConfiguration{Mode: GlobalConfigurationModeMixed}
-	config.SetAdditionalRedpandaProperty("b", "c")
-	config.SetAdditionalRedpandaProperty("a", "b")
-	assert.Equal(t, []string{"a", "b"}, config.GetClusterConfigurationKeys())
-
-	config = GlobalConfiguration{Mode: GlobalConfigurationModeClassic}
-	config.SetAdditionalRedpandaProperty("b", "c")
-	config.SetAdditionalRedpandaProperty("a", "b")
-	assert.Equal(t, []string{}, config.GetClusterConfigurationKeys())
-}

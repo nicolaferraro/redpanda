@@ -9,21 +9,21 @@ import (
 
 func TestComputePatch(t *testing.T) {
 	tests := []struct {
-		name     string
-		current  map[string]interface{}
-		existing map[string]interface{}
-		usedKeys []string
-		expected CentralConfigurationPatch
+		name        string
+		apply       map[string]interface{}
+		current     map[string]interface{}
+		lastApplied map[string]interface{}
+		expected    CentralConfigurationPatch
 	}{
 		{
 			name: "simple",
-			current: map[string]interface{}{
+			apply: map[string]interface{}{
 				"a": "b",
 			},
-			existing: map[string]interface{}{
+			current: map[string]interface{}{
 				"c": "d",
 			},
-			usedKeys: []string{},
+			lastApplied: map[string]interface{}{},
 			expected: CentralConfigurationPatch{
 				Upsert: map[string]interface{}{
 					"a": "b",
@@ -33,13 +33,13 @@ func TestComputePatch(t *testing.T) {
 		},
 		{
 			name: "remove dangling",
-			current: map[string]interface{}{
+			apply: map[string]interface{}{
 				"a": "b",
 			},
-			existing: map[string]interface{}{
+			current: map[string]interface{}{
 				"c": "d",
 			},
-			usedKeys: []string{"c", "x"},
+			lastApplied: map[string]interface{}{"c": "xx", "x": "xx"},
 			expected: CentralConfigurationPatch{
 				Upsert: map[string]interface{}{
 					"a": "b",
@@ -49,15 +49,15 @@ func TestComputePatch(t *testing.T) {
 		},
 		{
 			name: "upsert mismatches only",
-			current: map[string]interface{}{
+			apply: map[string]interface{}{
 				"a": "b",
 				"c": "x",
 			},
-			existing: map[string]interface{}{
+			current: map[string]interface{}{
 				"a": "b",
 				"c": "d",
 			},
-			usedKeys: []string{"a", "c"},
+			lastApplied: map[string]interface{}{"a": "xx", "c": "xx"},
 			expected: CentralConfigurationPatch{
 				Upsert: map[string]interface{}{
 					"c": "x",
@@ -67,15 +67,15 @@ func TestComputePatch(t *testing.T) {
 		},
 		{
 			name: "support type conversion",
-			current: map[string]interface{}{
+			apply: map[string]interface{}{
 				"a": "b",
 				"c": 23,
 			},
-			existing: map[string]interface{}{
+			current: map[string]interface{}{
 				"a": "b",
 				"c": "23",
 			},
-			usedKeys: []string{"a", "c"},
+			lastApplied: map[string]interface{}{"a": "xx", "c": "xx"},
 			expected: CentralConfigurationPatch{
 				Upsert: map[string]interface{}{},
 				Remove: []string{},
@@ -85,7 +85,7 @@ func TestComputePatch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("ComputePatch-%s", tc.name), func(t *testing.T) {
-			compPatch := ComputePatch(tc.current, tc.existing, tc.usedKeys)
+			compPatch := ThreeWayMerge(tc.apply, tc.current, tc.lastApplied)
 			assert.Equal(t, tc.expected.Upsert, compPatch.Upsert, "Upsert does not match")
 			assert.Equal(t, tc.expected.Remove, compPatch.Remove, "Remove list does not match")
 		})

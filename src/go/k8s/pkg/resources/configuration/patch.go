@@ -31,24 +31,24 @@ func (p CentralConfigurationPatch) Empty() bool {
 	return len(p.Upsert) == 0 && len(p.Remove) == 0
 }
 
-func ComputePatch(
+func ThreeWayMerge(
+	apply map[string]interface{},
 	current map[string]interface{},
-	old map[string]interface{},
-	lastUsedKeys []string,
+	lastApplied map[string]interface{},
 ) CentralConfigurationPatch {
 	patch := CentralConfigurationPatch{
 		// Initialize them early since nil values are rejected by the server
 		Upsert: make(map[string]interface{}),
 		Remove: make([]string, 0),
 	}
-	for k, v := range current {
-		if oldValue, ok := old[k]; !ok || !valueEquals(v, oldValue) {
+	for k, v := range apply {
+		if oldValue, ok := current[k]; !ok || !valueEquals(v, oldValue) {
 			patch.Upsert[k] = v
 		}
 	}
-	for _, k := range lastUsedKeys {
-		_, isPresent := current[k]
-		_, wasPresent := old[k]
+	for k := range lastApplied {
+		_, isPresent := apply[k]
+		_, wasPresent := current[k]
 		if !isPresent && wasPresent {
 			patch.Remove = append(patch.Remove, k)
 		}

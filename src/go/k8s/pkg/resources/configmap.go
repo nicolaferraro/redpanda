@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
 	"strconv"
 
 	"github.com/go-logr/logr"
@@ -73,8 +72,8 @@ var (
 	errKeyDoesNotExistInSecretData        = errors.New("cannot find key in secret data")
 	errCloudStorageSecretKeyCannotBeEmpty = errors.New("cloud storage SecretKey string cannot be empty")
 
-	// LastAppliedConfigurationKeysAnnotationKey is used to store the centralized configuration keys for three-way merge
-	LastAppliedConfigurationKeysAnnotationKey = redpandav1alpha1.GroupVersion.Group + "/last-applied-configuration-keys"
+	// LastAppliedConfigurationAnnotationKey is used to store the last applied centralized configuration for doing three-way merge
+	LastAppliedConfigurationAnnotationKey = redpandav1alpha1.GroupVersion.Group + "/last-applied-configuration"
 )
 
 var _ Resource = &ConfigMapResource{}
@@ -649,57 +648,29 @@ func (r *ConfigMapResource) CheckCentralizedConfigurationDrift(
 	return !reflect.DeepEqual(oldConfig, newConfig), nil
 }
 
-func (r *ConfigMapResource) GetLastUsedConfigurationKeys(
+func (r *ConfigMapResource) GetLastAppliedConfiguration(
 	ctx context.Context,
-) ([]string, bool, error) {
+) (map[string]interface{}, bool, error) {
 	existing := corev1.ConfigMap{}
 	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
 		if apierrors.IsNotFound(err) {
 			// No keys have been used previously
 			return nil, false, nil
 		}
-		return nil, false, fmt.Errorf("could not load configmap for checking configuration keys: %w", err)
+		return nil, false, fmt.Errorf("could not load configmap for reading last applied configuration: %w", err)
 	}
-	if ann, ok := existing.Annotations[LastAppliedConfigurationKeysAnnotationKey]; ok {
-		var lst []string
-		if err := json.Unmarshal([]byte(ann), &lst); err != nil {
-			return nil, false, fmt.Errorf("could not unmarshal configuration keys from configmap annotation %q: %w", LastAppliedConfigurationKeysAnnotationKey, err)
+	if ann, ok := existing.Annotations[LastAppliedConfigurationAnnotationKey]; ok {
+		var cnf map[string]interface{}
+		if err := json.Unmarshal([]byte(ann), &cnf); err != nil {
+			return nil, false, fmt.Errorf("could not unmarshal last applied configuration from configmap annotation %q: %w", LastAppliedConfigurationAnnotationKey, err)
 		}
-		return lst, true, nil
+		return cnf, true, nil
 	}
 	return nil, false, nil
 }
 
-func (r *ConfigMapResource) MergeLastUsedConfigurationKeys(
-	ctx context.Context, keys []string,
-) error {
-	curr, _, err := r.GetLastUsedConfigurationKeys(ctx)
-	if err != nil {
-		return err
-	}
-	if (len(curr) == 0 && len(keys) == 0) || reflect.DeepEqual(curr, keys) {
-		return nil
-	}
-	allKeys := make(map[string]bool)
-	for _, k := range curr {
-		allKeys[k] = true
-	}
-	for _, k := range keys {
-		allKeys[k] = true
-	}
-	merged := make([]string, 0, len(allKeys))
-	for k := range allKeys {
-		merged = append(merged, k)
-	}
-	sort.Strings(merged)
-	if reflect.DeepEqual(merged, curr) {
-		return nil
-	}
-	return r.SetLastUsedConfigurationKeys(ctx, merged)
-}
-
-func (r *ConfigMapResource) SetLastUsedConfigurationKeys(
-	ctx context.Context, keys []string,
+func (r *ConfigMapResource) SetLastAppliedConfiguration(
+	ctx context.Context, config map[string]interface{},
 ) error {
 	existing := corev1.ConfigMap{}
 	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
@@ -707,17 +678,21 @@ func (r *ConfigMapResource) SetLastUsedConfigurationKeys(
 			// No place where to store them
 			return nil
 		}
-		return fmt.Errorf("could not load configmap for storing configuration keys: %w", err)
+		return fmt.Errorf("could not load configmap for storing last applied configuration: %w", err)
 	}
-	ser, err := json.Marshal(keys)
+	if config == nil {
+		// Save an empty map instead of "null"
+		config = make(map[string]interface{})
+	}
+	ser, err := json.Marshal(config)
 	if err != nil {
-		return fmt.Errorf("could not marhsal configuration keys: %w", err)
+		return fmt.Errorf("could not marhsal configuration: %w", err)
 	}
 
 	if existing.Annotations == nil {
 		existing.Annotations = make(map[string]string)
 	}
-	existing.Annotations[LastAppliedConfigurationKeysAnnotationKey] = string(ser)
+	existing.Annotations[LastAppliedConfigurationAnnotationKey] = string(ser)
 	return r.Update(ctx, &existing)
 }
 

@@ -26,38 +26,27 @@ func (r *ClusterReconciler) markConfigurationChanged(
 	log logr.Logger,
 ) (bool, error) {
 	if redpandaCluster.Status.GetConditionStatus(redpandav1alpha1.ClusterConfiguredConditionType) != corev1.ConditionFalse {
-		// If the condition is not present, or it does not indicate a change, we check if it still holds
+		// If the condition is not present, or it does not currently indicate a change, we check for drifts
 		if drift, err := configMapResource.CheckCentralizedConfigurationDrift(ctx); err != nil {
 			return false, fmt.Errorf("error while checking centralized configuration drift: %w", err)
 		} else if drift {
 			log.Info("Detected configuration drift in the cluster")
 
 			// Update configuration keys
-			_, present, err := configMapResource.GetLastUsedConfigurationKeys(ctx)
+			_, present, err := configMapResource.GetLastAppliedConfiguration(ctx)
 			if err != nil {
 				return false, err
 			}
 			if !present {
 				// If no previous annotation was set for last applied configuration keys, then the ones in boostrap.yaml are taken as reference
+				// TODO consider conversion from old format to handle the upgrade case, where bootstrap.yaml is not present
 				config, err := configMapResource.GetCurrentGlobalConfigurationFromCluster(ctx, configuration.DefaultCentralizedMode())
 				if err != nil {
 					return false, err
 				} else if config != nil {
-					keysFromBootstrap := config.GetClusterConfigurationKeys()
-					if err := configMapResource.SetLastUsedConfigurationKeys(ctx, keysFromBootstrap); err != nil {
+					if err := configMapResource.SetLastAppliedConfiguration(ctx, config.ClusterConfiguration); err != nil {
 						return false, err
 					}
-				}
-			} else {
-				// Here we could keep the existing last applied keys, but, to avoid any corner case that lead to cluster out of sync,
-				// we augment the list of used keys with the properties in the current configuration, to signal that we're about to update them
-				// via admin API, so in case of intermediate failure, the process will restore their original state.
-				currentConfig, err := configMapResource.CreateConfiguration(ctx)
-				if err != nil {
-					return false, err
-				}
-				if err := configMapResource.MergeLastUsedConfigurationKeys(ctx, currentConfig.GetClusterConfigurationKeys()); err != nil {
-					return false, err
 				}
 			}
 
@@ -124,12 +113,12 @@ func (r *ClusterReconciler) syncConfiguration(
 		return fmt.Errorf("could not get current centralized configuration from cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
 	}
 
-	lastUsedKeys, _, err := configMapResource.GetLastUsedConfigurationKeys(ctx)
+	lastAppliedConfiguration, _, err := configMapResource.GetLastAppliedConfiguration(ctx)
 	if err != nil {
 		return err
 	}
 
-	patch := configuration.ComputePatch(config.ClusterConfiguration, clusterConfig, lastUsedKeys)
+	patch := configuration.ThreeWayMerge(config.ClusterConfiguration, clusterConfig, lastAppliedConfiguration)
 	if !patch.Empty() {
 		log.Info("Applying patch to the cluster", "patch", patch.String())
 		_, err := adminAPI.PatchClusterConfig(patch.Upsert, patch.Remove)
@@ -138,16 +127,12 @@ func (r *ClusterReconciler) syncConfiguration(
 		}
 	}
 
-	// Mark the new keys for next update
-	newKeys := config.GetClusterConfigurationKeys()
-	if !reflect.DeepEqual(lastUsedKeys, newKeys) {
-		if err := configMapResource.SetLastUsedConfigurationKeys(ctx, newKeys); err != nil {
-			return fmt.Errorf("could not mark configuration keys sent to cluster: %w", err)
-		}
-	}
+	// TODO a failure and restart here may lead to inconsistency if the user changes the CR in the meantime (e.g. removing a field),
+	// since we applied a config to the cluster but did not store the information anywhere else.
+	// A possible fix is doing a two-phase commit (first stage commit on configmap, then apply it to the cluster, with possibility to recover on failure),
+	// but it seems overkill given that the case is rare and requires cooperation from the user.
 
-	filterRestart := filterRestartKeys(schema, config.ClusterConfiguration)
-	hash, err := config.GetHash(filterRestart)
+	hash, err := config.GetHash(schema)
 	if err != nil {
 		return fmt.Errorf("could not compute hash of the new configuration for cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
 	}
@@ -159,6 +144,17 @@ func (r *ClusterReconciler) syncConfiguration(
 	}
 
 	oldHash := sts.Annotations[resources.ConfigMapHashAnnotationKey]
+	if oldHash == "" {
+		// Annotation not yet set on the statefulset (e.g. first time we change config).
+		// We check a diff against last applied configuration.
+		prevConfig := *config
+		prevConfig.ClusterConfiguration = lastAppliedConfiguration
+		oldHash, err = prevConfig.GetHash(schema)
+		if err != nil {
+			return err
+		}
+	}
+
 	if oldHash != hash {
 		// Needs restart
 		if sts.Annotations == nil {
@@ -168,6 +164,14 @@ func (r *ClusterReconciler) syncConfiguration(
 		// ignoring banzaicloud last modified annotation on purpose
 		if err := r.Update(ctx, &sts); err != nil {
 			return fmt.Errorf("could not update config hash on statefulset %v: %w", stsKey, err)
+		}
+	}
+
+	// Mark the new lastAppliedConfiguration for next update
+	sameConfig := (len(lastAppliedConfiguration) == 0 && len(config.ClusterConfiguration) == 0) || reflect.DeepEqual(lastAppliedConfiguration, config.ClusterConfiguration)
+	if !sameConfig {
+		if err := configMapResource.SetLastAppliedConfiguration(ctx, config.ClusterConfiguration); err != nil {
+			return fmt.Errorf("could not store last applied configuration in the cluster: %w", err)
 		}
 	}
 
@@ -244,18 +248,4 @@ func mapToCondition(
 		}
 	}
 	return *condition
-}
-
-func filterRestartKeys(
-	schema admin.ConfigSchema, config map[string]interface{},
-) map[string]bool {
-	filter := make(map[string]bool, len(config))
-	for k := range config {
-		if s, ok := schema[k]; ok {
-			if s.NeedsRestart {
-				filter[k] = true
-			}
-		}
-	}
-	return filter
 }

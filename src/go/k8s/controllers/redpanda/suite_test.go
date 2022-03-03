@@ -21,6 +21,7 @@ import (
 	redpandav1alpha1 "github.com/vectorizedio/redpanda/src/go/k8s/apis/redpanda/v1alpha1"
 	redpandacontrollers "github.com/vectorizedio/redpanda/src/go/k8s/controllers/redpanda"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources"
+	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/configuration"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
 	"github.com/vectorizedio/redpanda/src/go/rpk/pkg/api/admin"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -102,6 +103,11 @@ var _ = BeforeSuite(func(done Done) {
 	close(done)
 }, 60)
 
+var _ = BeforeEach(func() {
+	By("Cleaning the admin API")
+	testAdminAPI.Clear()
+})
+
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	gexec.KillAndWait(5 * time.Second)
@@ -110,7 +116,9 @@ var _ = AfterSuite(func() {
 })
 
 type mockAdminAPI struct {
-	config admin.Config
+	config  admin.Config
+	schema  admin.ConfigSchema
+	patches []configuration.CentralConfigurationPatch
 }
 
 var _ utils.AdminAPIClient = &mockAdminAPI{}
@@ -124,7 +132,7 @@ func (m *mockAdminAPI) ClusterConfigStatus() (admin.ConfigStatusResponse, error)
 }
 
 func (m *mockAdminAPI) ClusterConfigSchema() (admin.ConfigSchema, error) {
-	return nil, nil
+	return m.schema, nil
 }
 
 func (m *mockAdminAPI) PatchClusterConfig(upsert map[string]interface{}, remove []string) (admin.ClusterConfigWriteResult, error) {
@@ -137,9 +145,56 @@ func (m *mockAdminAPI) PatchClusterConfig(upsert map[string]interface{}, remove 
 	for _, k := range remove {
 		delete(m.config, k)
 	}
+	m.patches = append(m.patches, configuration.CentralConfigurationPatch{
+		Upsert: upsert,
+		Remove: remove,
+	})
 	return admin.ClusterConfigWriteResult{}, nil
 }
 
 func (m *mockAdminAPI) CreateUser(_, _, _ string) error {
 	return nil
+}
+
+func (m *mockAdminAPI) Clear() {
+	m.config = nil
+	m.schema = nil
+	m.patches = nil
+}
+
+func (m *mockAdminAPI) RegisterPropertySchema(name string, metadata admin.ConfigPropertyMetadata) {
+	if m.schema == nil {
+		m.schema = make(map[string]admin.ConfigPropertyMetadata)
+	}
+	m.schema[name] = metadata
+}
+
+func (m *mockAdminAPI) IsEmptyGetter() func() bool {
+	return func() bool {
+		return len(m.config) == 0
+	}
+}
+
+func (m *mockAdminAPI) PropertyGetter(name string) func() interface{} {
+	return func() interface{} {
+		return m.config[name]
+	}
+}
+
+func (m *mockAdminAPI) ConfigGetter() func() admin.Config {
+	return func() admin.Config {
+		return m.config
+	}
+}
+
+func (m *mockAdminAPI) PatchesGetter() func() []configuration.CentralConfigurationPatch {
+	return func() []configuration.CentralConfigurationPatch {
+		return m.patches
+	}
+}
+
+func (m *mockAdminAPI) NumPatchesGetter() func() int {
+	return func() int {
+		return len(m.PatchesGetter()())
+	}
 }
