@@ -26,7 +26,7 @@ import (
 	"github.com/banzaicloud/k8s-objectmatcher/patch"
 	cmetav1 "github.com/jetstack/cert-manager/pkg/apis/meta/v1"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/labels"
-	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
+	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,6 +61,14 @@ var errRedpandaNotReady = errors.New("redpanda not ready")
 func (r *StatefulSetResource) runUpdate(
 	ctx context.Context, current, modified *appsv1.StatefulSet,
 ) error {
+	// Keep existing central config hash annotation during standard reconciliation
+	if ann, ok := current.Spec.Template.Annotations[CentralizedConfigurationHashAnnotationKey]; ok {
+		if modified.Spec.Template.Annotations == nil {
+			modified.Spec.Template.Annotations = make(map[string]string)
+		}
+		modified.Spec.Template.Annotations[CentralizedConfigurationHashAnnotationKey] = ann
+	}
+
 	update, err := r.shouldUpdate(r.pandaCluster.Status.Upgrading, current, modified)
 	if err != nil {
 		return fmt.Errorf("unable to determine the update procedure: %w", err)
@@ -120,6 +128,8 @@ func (r *StatefulSetResource) rollingUpdate(
 		ignoreKubernetesTokenVolumeMounts(),
 		ignoreDefaultToleration(),
 		ignoreExistingVolumes(volumes),
+		utils.IgnoreAnnotation(patch.LastAppliedConfig),
+		utils.IgnoreAnnotation(CentralizedConfigurationHashAnnotationKey),
 	}
 
 	for i := range podList.Items {
@@ -168,19 +178,6 @@ func (r *StatefulSetResource) updateStatefulSet(
 	current *appsv1.StatefulSet,
 	modified *appsv1.StatefulSet,
 ) error {
-	if featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
-		// Keep existing configmap hash annotation during standard reconciliation
-		ann, ok := current.Annotations[ConfigMapHashAnnotationKey]
-		if modified.Annotations == nil {
-			modified.Annotations = make(map[string]string)
-		}
-		if ok {
-			modified.Annotations[ConfigMapHashAnnotationKey] = ann
-		} else {
-			delete(modified.Annotations, ConfigMapHashAnnotationKey)
-		}
-	}
-
 	_, err := Update(ctx, current, modified, r.Client, r.logger)
 	if err != nil && strings.Contains(err.Error(), "spec: Forbidden: updates to statefulset spec for fields other than") {
 		// REF: https://github.com/kubernetes/kubernetes/issues/69041#issuecomment-723757166
@@ -209,12 +206,13 @@ func (r *StatefulSetResource) shouldUpdate(
 	opts := []patch.CalculateOption{
 		patch.IgnoreStatusFields(),
 		patch.IgnoreVolumeClaimTemplateTypeMetaAndStatus(),
+		utils.IgnoreAnnotation(patch.LastAppliedConfig),
+		utils.IgnoreAnnotation(CentralizedConfigurationHashAnnotationKey),
 	}
 	patchResult, err := patch.DefaultPatchMaker.Calculate(current, modified, opts...)
 	if err != nil {
 		return false, err
 	}
-
 	return !patchResult.IsEmpty() || isUpgrading, nil
 }
 

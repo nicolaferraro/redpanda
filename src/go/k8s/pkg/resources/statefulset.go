@@ -65,7 +65,8 @@ const (
 )
 
 var (
-	ConfigMapHashAnnotationKey = redpandav1alpha1.GroupVersion.Group + "/configmap-hash"
+	ConfigMapHashAnnotationKey                = redpandav1alpha1.GroupVersion.Group + "/configmap-hash"
+	CentralizedConfigurationHashAnnotationKey = redpandav1alpha1.GroupVersion.Group + "/centralized-configuration-hash"
 )
 
 // ConfiguratorSettings holds settings related to configurator container and deployment
@@ -189,39 +190,24 @@ func (r *StatefulSetResource) Ensure(ctx context.Context) error {
 		return fmt.Errorf("error while fetching StatefulSet resource: %w", err)
 	}
 	r.LastObservedState = &sts
-
-	if featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
-		// When using central config, the statefulset must retain the configuration hash set on the existing resource
-		// by a secondary controller.
-		newSts := obj.(*appsv1.StatefulSet)
-		if _, ok := newSts.Spec.Template.Annotations[ConfigMapHashAnnotationKey]; !ok {
-			if oldVal, oldOk := sts.Spec.Template.Annotations[ConfigMapHashAnnotationKey]; oldOk {
-				if newSts.Spec.Template.Annotations == nil {
-					newSts.Spec.Template.Annotations = make(map[string]string)
-				}
-				newSts.Spec.Template.Annotations[ConfigMapHashAnnotationKey] = oldVal
-			}
-		}
-	}
-
 	r.logger.Info("Running update", "resource name", r.Key().Name)
 	return r.runUpdate(ctx, &sts, obj.(*appsv1.StatefulSet))
 }
 
-func (r *StatefulSetResource) GetConfigMapHashFromCluster(
+func (r *StatefulSetResource) GetCentralizedConfigurationHashFromCluster(
 	ctx context.Context,
 ) (string, error) {
 	existing := appsv1.StatefulSet{}
 	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
-		return "", fmt.Errorf("could not load statefulset for reading the configmap hash: %w", err)
+		return "", fmt.Errorf("could not load statefulset for reading the centralized configuration hash: %w", err)
 	}
-	if hash, ok := existing.Spec.Template.Annotations[ConfigMapHashAnnotationKey]; ok {
+	if hash, ok := existing.Spec.Template.Annotations[CentralizedConfigurationHashAnnotationKey]; ok {
 		return hash, nil
 	}
 	return "", nil
 }
 
-func (r *StatefulSetResource) SetConfigMapHashInCluster(
+func (r *StatefulSetResource) SetCentralizedConfigurationHashInCluster(
 	ctx context.Context, hash string,
 ) error {
 	existing := appsv1.StatefulSet{}
@@ -230,12 +216,12 @@ func (r *StatefulSetResource) SetConfigMapHashInCluster(
 			// No place where to store it
 			return nil
 		}
-		return fmt.Errorf("could not load statefulset for storing the configmap hash: %w", err)
+		return fmt.Errorf("could not load statefulset for storing the centralized configuration hash: %w", err)
 	}
 	if existing.Spec.Template.Annotations == nil {
 		existing.Spec.Template.Annotations = make(map[string]string)
 	}
-	existing.Spec.Template.Annotations[ConfigMapHashAnnotationKey] = hash
+	existing.Spec.Template.Annotations[CentralizedConfigurationHashAnnotationKey] = hash
 	return r.Update(ctx, &existing)
 }
 
@@ -284,16 +270,11 @@ func (r *StatefulSetResource) obj(
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-
-	if !featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
-		// We embed config hash statically here only for older clusters.
-		// In any case, the annotation is marked to be ignored by the patch mechanism.
-		configMapHash, err := r.nodeConfigMapHashGetter(ctx)
-		if err != nil {
-			return nil, err
-		}
-		annotations[ConfigMapHashAnnotationKey] = configMapHash
+	configMapHash, err := r.nodeConfigMapHashGetter(ctx)
+	if err != nil {
+		return nil, err
 	}
+	annotations[ConfigMapHashAnnotationKey] = configMapHash
 	tolerations := r.pandaCluster.Spec.Tolerations
 	nodeSelector := r.pandaCluster.Spec.NodeSelector
 
@@ -526,7 +507,7 @@ func (r *StatefulSetResource) obj(
 		ss.Spec.Template.Spec.Containers = append(ss.Spec.Template.Spec.Containers, *rpkStatusContainer)
 	}
 
-	err := controllerutil.SetControllerReference(r.pandaCluster, ss, r.scheme)
+	err = controllerutil.SetControllerReference(r.pandaCluster, ss, r.scheme)
 	if err != nil {
 		return nil, err
 	}

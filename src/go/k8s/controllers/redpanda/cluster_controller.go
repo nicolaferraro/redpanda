@@ -270,7 +270,7 @@ func (r *ClusterReconciler) Reconcile(
 		log.Error(err, "Unable to report status")
 	}
 
-	err = r.syncConfiguration(
+	err = r.reconcileConfiguration(
 		ctx,
 		&redpandaCluster,
 		configMapResource,
@@ -366,7 +366,12 @@ func (r *ClusterReconciler) reportStatus(
 			cluster.Status.Nodes = *nodeList
 			cluster.Status.Replicas = lastObservedSts.Status.ReadyReplicas
 
-			return r.Status().Update(ctx, &cluster)
+			err = r.Status().Update(ctx, &cluster)
+			if err == nil {
+				// sync original cluster variable to avoid conflicts on subsequent operations
+				*redpandaCluster = cluster
+			}
+			return err
 		})
 		if err != nil {
 			return fmt.Errorf("failed to update cluster status: %w", err)

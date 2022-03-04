@@ -127,6 +127,14 @@ func (r *ConfigMapResource) Ensure(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error while fetching ConfigMap resource: %w", err)
 	}
+	// Do not touch existing last-applied-configuration (it's not reconciled in the main loop)
+	if val, ok := cm.Annotations[LastAppliedConfigurationAnnotationKey]; ok {
+		newCm := obj.(*corev1.ConfigMap)
+		if newCm.Annotations == nil {
+			newCm.Annotations = make(map[string]string)
+		}
+		newCm.Annotations[LastAppliedConfigurationAnnotationKey] = val
+	}
 	_, err = Update(ctx, &cm, obj, r.Client, r.logger)
 	return err
 }
@@ -609,16 +617,35 @@ func generatePassword(length int) (string, error) {
 	return string(bytes), nil
 }
 
-// GetNodeConfigHash returns md5 hash of the configmap `redpanda.yaml` file only (used prior to 22.1)
+// GetNodeConfigHash returns md5 hash of the configuration.
+// For clusters without centralized configuration, it computes a hash of the plain "redpanda.yaml" file.
+// When using centralized configuration, it only takes into account node properties.
 func (r *ConfigMapResource) GetNodeConfigHash(
 	ctx context.Context,
 ) (string, error) {
-	obj, err := r.obj(ctx)
-	if err != nil {
-		return "", err
+	var configString string
+	if featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
+		cfg, err := r.CreateConfiguration(ctx)
+		if err != nil {
+			return "", err
+		}
+		// clean any cluster property from config before serializing
+		cfg.ClusterConfiguration = nil
+		cfg.NodeConfiguration.Redpanda.Other = nil
+		ser, err := cfg.Serialize()
+		if err != nil {
+			return "", err
+		}
+		configString = string(ser.RedpandaFile)
+	} else {
+		obj, err := r.obj(ctx)
+		if err != nil {
+			return "", err
+		}
+		configMap := obj.(*corev1.ConfigMap)
+		configString = configMap.Data[configKey]
 	}
-	configMap := obj.(*corev1.ConfigMap)
-	configString := configMap.Data[configKey]
+
 	md5Hash := md5.Sum([]byte(configString)) // nolint:gosec // this is not encrypting secure info
 	return fmt.Sprintf("%x", md5Hash), nil
 }

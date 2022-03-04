@@ -16,7 +16,7 @@ import (
 )
 
 // preCheckConfigurationChange verifies and marks the cluster as needing synchronization (using the ClusterConfigured condition).
-// When this method returns true, the cluster CR is marked, indicating that the target cluster will be eventually synchronized (via syncConfiguration).
+// When this method returns true, the cluster CR is marked, indicating that the target cluster will be eventually synchronized (via reconcileConfiguration).
 func (r *ClusterReconciler) markConfigurationChanged(
 	ctx context.Context,
 	redpandaCluster *redpandav1alpha1.Cluster,
@@ -42,6 +42,10 @@ func (r *ClusterReconciler) markConfigurationChanged(
 				if err != nil {
 					return false, err
 				} else if config != nil {
+					if config.ClusterConfiguration == nil {
+						// Upgrade case: we need to convert the properties from old format
+						config.Convert(configuration.DefaultCentralizedMode())
+					}
 					if err := configMapResource.SetLastAppliedConfigurationInCluster(ctx, config.ClusterConfiguration); err != nil {
 						return false, err
 					}
@@ -61,8 +65,8 @@ func (r *ClusterReconciler) markConfigurationChanged(
 	return false, nil
 }
 
-// syncConfiguration ensures that the cluster configuration is synchronized with expected data
-func (r *ClusterReconciler) syncConfiguration(
+// reconcileConfiguration ensures that the cluster configuration is synchronized with expected data
+func (r *ClusterReconciler) reconcileConfiguration(
 	ctx context.Context,
 	redpandaCluster *redpandav1alpha1.Cluster,
 	configMapResource *resources.ConfigMapResource,
@@ -131,12 +135,12 @@ func (r *ClusterReconciler) syncConfiguration(
 	// A possible fix is doing a two-phase commit (first stage commit on configmap, then apply it to the cluster, with possibility to recover on failure),
 	// but it seems overkill given that the case is rare and requires cooperation from the user.
 
-	hash, err := config.GetHash(schema)
+	hash, err := config.GetCentralizedConfigurationHash(schema)
 	if err != nil {
 		return fmt.Errorf("could not compute hash of the new configuration for cluster %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
 	}
 
-	oldHash, err := statefulSetResource.GetConfigMapHashFromCluster(ctx)
+	oldHash, err := statefulSetResource.GetCentralizedConfigurationHashFromCluster(ctx)
 	if err != nil {
 		return err
 	}
@@ -146,7 +150,7 @@ func (r *ClusterReconciler) syncConfiguration(
 		// We check a diff against last applied configuration to avoid triggering a restart when not needed.
 		prevConfig := *config
 		prevConfig.ClusterConfiguration = lastAppliedConfiguration
-		oldHash, err = prevConfig.GetHash(schema)
+		oldHash, err = prevConfig.GetCentralizedConfigurationHash(schema)
 		if err != nil {
 			return err
 		}
@@ -154,7 +158,7 @@ func (r *ClusterReconciler) syncConfiguration(
 
 	if oldHash != hash {
 		// Definitely needs restart
-		if err := statefulSetResource.SetConfigMapHashInCluster(ctx, hash); err != nil {
+		if err := statefulSetResource.SetCentralizedConfigurationHashInCluster(ctx, hash); err != nil {
 			return fmt.Errorf("could not update config hash on statefulset %s/%s: %w", redpandaCluster.Namespace, redpandaCluster.Name, err)
 		}
 	}

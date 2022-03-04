@@ -10,6 +10,7 @@
 package redpanda_test
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -116,9 +117,10 @@ var _ = AfterSuite(func() {
 })
 
 type mockAdminAPI struct {
-	config  admin.Config
-	schema  admin.ConfigSchema
-	patches []configuration.CentralConfigurationPatch
+	config      admin.Config
+	schema      admin.ConfigSchema
+	patches     []configuration.CentralConfigurationPatch
+	unavailable bool
 }
 
 var _ utils.AdminAPIClient = &mockAdminAPI{}
@@ -128,14 +130,23 @@ func (m *mockAdminAPI) Config() (admin.Config, error) {
 }
 
 func (m *mockAdminAPI) ClusterConfigStatus() (admin.ConfigStatusResponse, error) {
+	if m.unavailable {
+		return admin.ConfigStatusResponse{}, errors.New("unavailable")
+	}
 	return admin.ConfigStatusResponse{}, nil
 }
 
 func (m *mockAdminAPI) ClusterConfigSchema() (admin.ConfigSchema, error) {
+	if m.unavailable {
+		return admin.ConfigSchema{}, errors.New("unavailable")
+	}
 	return m.schema, nil
 }
 
 func (m *mockAdminAPI) PatchClusterConfig(upsert map[string]interface{}, remove []string) (admin.ClusterConfigWriteResult, error) {
+	if m.unavailable {
+		return admin.ClusterConfigWriteResult{}, errors.New("unavailable")
+	}
 	if m.config == nil {
 		m.config = make(map[string]interface{})
 	}
@@ -153,6 +164,9 @@ func (m *mockAdminAPI) PatchClusterConfig(upsert map[string]interface{}, remove 
 }
 
 func (m *mockAdminAPI) CreateUser(_, _, _ string) error {
+	if m.unavailable {
+		return errors.New("unavailable")
+	}
 	return nil
 }
 
@@ -160,6 +174,7 @@ func (m *mockAdminAPI) Clear() {
 	m.config = nil
 	m.schema = nil
 	m.patches = nil
+	m.unavailable = false
 }
 
 func (m *mockAdminAPI) RegisterPropertySchema(name string, metadata admin.ConfigPropertyMetadata) {
@@ -167,12 +182,6 @@ func (m *mockAdminAPI) RegisterPropertySchema(name string, metadata admin.Config
 		m.schema = make(map[string]admin.ConfigPropertyMetadata)
 	}
 	m.schema[name] = metadata
-}
-
-func (m *mockAdminAPI) IsEmptyGetter() func() bool {
-	return func() bool {
-		return len(m.config) == 0
-	}
 }
 
 func (m *mockAdminAPI) PropertyGetter(name string) func() interface{} {
@@ -197,4 +206,15 @@ func (m *mockAdminAPI) NumPatchesGetter() func() int {
 	return func() int {
 		return len(m.PatchesGetter()())
 	}
+}
+
+func (m *mockAdminAPI) SetProperty(key string, value interface{}) {
+	if m.config == nil {
+		m.config = make(map[string]interface{})
+	}
+	m.config[key] = value
+}
+
+func (m *mockAdminAPI) SetUnavailable(unavailable bool) {
+	m.unavailable = unavailable
 }

@@ -52,27 +52,19 @@ func (c *GlobalConfiguration) SetAdditionalFlatProperties(
 	return c.Mode.SetAdditionalFlatProperties(c, props)
 }
 
-// GetHash computes a hash of the configuration considering all node properties and only the cluster properties
-// that require a restart (this is why the schema is needed).
+// GetCentralizedConfigurationHash computes a hash of the centralized configuration considering only the
+// cluster properties that require a restart (this is why the schema is needed).
 // We assume that properties not in schema require restart.
-func (c *GlobalConfiguration) GetHash(
+func (c *GlobalConfiguration) GetCentralizedConfigurationHash(
 	schema admin.ConfigSchema,
 ) (string, error) {
 	clone := *c
 
-	// Ignore cluster properties that don't need restart
+	// Ignore cluster properties that don't require restart
 	clone.ClusterConfiguration = make(map[string]interface{})
 	for k, v := range c.ClusterConfiguration {
 		if meta, ok := schema[k]; !ok || meta.NeedsRestart {
 			clone.ClusterConfiguration[k] = v
-		}
-	}
-
-	// Ignore redpanda additional properties that don't need restart
-	clone.NodeConfiguration.Redpanda.Other = make(map[string]interface{})
-	for k, v := range c.NodeConfiguration.Redpanda.Other {
-		if meta, ok := schema[k]; !ok || meta.NeedsRestart {
-			clone.NodeConfiguration.Redpanda.Other[k] = v
 		}
 	}
 
@@ -81,9 +73,22 @@ func (c *GlobalConfiguration) GetHash(
 		return "", err
 	}
 
-	full := append([]byte{}, serialized.RedpandaFile...)
-	full = append(full, serialized.BootstrapFile...)
-	// We keep using md5 for compatibility with previous approach
-	md5Hash := md5.Sum(full) // nolint:gosec // this is not encrypting secure info
+	// We keep using md5 for having the same format as node hash
+	md5Hash := md5.Sum(serialized.BootstrapFile) // nolint:gosec // this is not encrypting secure info
 	return fmt.Sprintf("%x", md5Hash), nil
+}
+
+func (c *GlobalConfiguration) Convert(targetMode GlobalConfigurationMode) {
+	props := make(map[string]interface{}, len(c.ClusterConfiguration)+len(c.NodeConfiguration.Redpanda.Other))
+	for k, v := range c.ClusterConfiguration {
+		props[k] = v
+	}
+	for k, v := range c.NodeConfiguration.Redpanda.Other {
+		props[k] = v
+	}
+	c.ClusterConfiguration = nil
+	c.NodeConfiguration.Redpanda.Other = nil
+	for k, v := range props {
+		targetMode.SetAdditionalRedpandaProperty(c, k, v)
+	}
 }
