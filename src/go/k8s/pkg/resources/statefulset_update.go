@@ -27,7 +27,6 @@ import (
 	cmetav1 "github.com/jetstack/cert-manager/pkg/apis/meta/v1"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/labels"
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
-	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/utils"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -210,10 +209,6 @@ func (r *StatefulSetResource) shouldUpdate(
 	opts := []patch.CalculateOption{
 		patch.IgnoreStatusFields(),
 		patch.IgnoreVolumeClaimTemplateTypeMetaAndStatus(),
-	}
-	if r.pandaCluster != nil && featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
-		// Ignore the configmap-hash annotation since it will be manually managed
-		opts = append(opts, utils.IgnoreAnnotation(ConfigMapHashAnnotationKey))
 	}
 	patchResult, err := patch.DefaultPatchMaker.Calculate(current, modified, opts...)
 	if err != nil {
