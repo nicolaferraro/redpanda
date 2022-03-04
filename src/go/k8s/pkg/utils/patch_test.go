@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -46,4 +47,42 @@ func TestPatchComputation(t *testing.T) {
 	assert.Equal(t, modObj2.Annotations["c"], "d")
 	assert.Equal(t, modObj2.Annotations["e"], "f")
 	assert.Len(t, modObj2.Annotations, 2)
+}
+
+func TestStatefulSetPatchComputation(t *testing.T) {
+	sts := appsv1.StatefulSet{
+		Spec: appsv1.StatefulSetSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: v1.ObjectMeta{
+					Annotations: map[string]string{
+						"a": "b",
+						"c": "d",
+					},
+				},
+			},
+		},
+	}
+
+	sts2 := sts.DeepCopy()
+	sts2.Spec.Template.Annotations["e"] = "f"
+
+	current, err := json.Marshal(sts)
+	require.NoError(t, err)
+	modified, err := json.Marshal(sts2)
+	require.NoError(t, err)
+
+	opt := IgnoreAnnotation("a")
+	current, modified, err = opt(current, modified)
+
+	stsRes1 := appsv1.StatefulSet{}
+	err = json.Unmarshal(current, &stsRes1)
+	require.NoError(t, err)
+	assert.Len(t, stsRes1.Spec.Template.Annotations, 1)
+	assert.Empty(t, stsRes1.Spec.Template.Annotations["a"])
+
+	stsRes2 := appsv1.StatefulSet{}
+	err = json.Unmarshal(modified, &stsRes2)
+	require.NoError(t, err)
+	assert.Len(t, stsRes2.Spec.Template.Annotations, 2)
+	assert.Empty(t, stsRes2.Spec.Template.Annotations["a"])
 }

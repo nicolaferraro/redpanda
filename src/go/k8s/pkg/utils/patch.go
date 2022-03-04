@@ -20,7 +20,8 @@ func IgnoreAnnotation(name string) patch.CalculateOption {
 			return []byte{}, []byte{}, fmt.Errorf("could not unmarshal byte sequence for modified: %w", err)
 		}
 
-		if removeElement(currentResource, "metadata", "annotations", name) {
+		if removeElement(currentResource, "metadata", "annotations", name) ||
+			removeElement(currentResource, "spec", "template", "metadata", "annotations", name) {
 			marsh, err := jsoniter.ConfigCompatibleWithStandardLibrary.Marshal(currentResource)
 			if err != nil {
 				return current, modified, fmt.Errorf("could not marshal current resource: %w", err)
@@ -28,7 +29,8 @@ func IgnoreAnnotation(name string) patch.CalculateOption {
 			current = marsh
 		}
 
-		if removeElement(modifiedResource, "metadata", "annotations", name) {
+		if removeElement(modifiedResource, "metadata", "annotations", name) ||
+			removeElement(modifiedResource, "spec", "template", "metadata", "annotations", name) {
 			marsh, err := jsoniter.ConfigCompatibleWithStandardLibrary.Marshal(modifiedResource)
 			if err != nil {
 				return current, modified, fmt.Errorf("could not marshal modified resource: %w", err)

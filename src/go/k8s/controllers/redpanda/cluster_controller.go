@@ -274,6 +274,7 @@ func (r *ClusterReconciler) Reconcile(
 		ctx,
 		&redpandaCluster,
 		configMapResource,
+		sts,
 		headlessSvc.HeadlessServiceFQDN(r.clusterDomain),
 		log,
 	)

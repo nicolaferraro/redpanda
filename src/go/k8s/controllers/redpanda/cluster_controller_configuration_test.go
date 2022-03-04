@@ -26,8 +26,8 @@ const (
 	bootstrapConfigurationFile    = "bootstrap.yaml"
 	centralizedConfigContainerTag = "v22.1.1-dev"
 
-	timeoutShort  = time.Second * 1
-	intervalShort = time.Millisecond * 200
+	timeoutShort  = time.Millisecond * 200
+	intervalShort = time.Millisecond * 50
 )
 
 var _ = Describe("RedPandaCluster configuration controller", func() {
@@ -55,13 +55,13 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			Eventually(resourceGetter(key, &appsv1.StatefulSet{})).Should(Succeed())
 
 			By("Skipping the configmap-hash annotation on the statefulset")
-			Expect(sts.Annotations["redpanda.vectorized.io/configmap-hash"]).To(BeEmpty())
+			Expect(sts.Spec.Template.Annotations["redpanda.vectorized.io/configmap-hash"]).To(BeEmpty())
 
 			By("Not calling the admin API for any reason")
 			Consistently(testAdminAPI.IsEmptyGetter(), timeoutShort, intervalShort).Should(BeTrue())
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 		})
 
 		It("Should interact with the admin API when doing changes", func() {
@@ -89,7 +89,7 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			Consistently(testAdminAPI.PatchesGetter(), timeoutShort, intervalShort).Should(HaveLen(1))
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 
 			By("Not changing the configmap-hash in the statefulset")
 			Consistently(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash"), timeoutShort, intervalShort).Should(BeEmpty())
@@ -130,7 +130,7 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			Eventually(testAdminAPI.PropertyGetter("p0"), timeout, interval).Should(Equal("v0"))
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 
 			By("Accepting two new properties")
 			testAdminAPI.RegisterPropertySchema("p1", admin.ConfigPropertyMetadata{NeedsRestart: false})
@@ -157,7 +157,7 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			}))
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 
 			By("Accepting a deletion and a change")
 			Expect(k8sClient.Get(context.Background(), key, &cluster)).To(Succeed())
@@ -180,7 +180,7 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			}))
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 
 			By("Never restarting the cluster")
 			Consistently(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash"), timeoutShort, intervalShort).Should(BeEmpty())
@@ -197,7 +197,7 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			Eventually(resourceGetter(key, &appsv1.StatefulSet{}), timeout, interval).Should(Succeed())
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 
 			By("Starting with an empty hash")
 			Expect(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash")()).To(BeEmpty())
@@ -216,7 +216,7 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			Eventually(testAdminAPI.PropertyGetter("prop-restart"), timeout, interval).Should(Equal("the-value"))
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 
 			By("Changing the statefulset hash and keeping it stable")
 			Eventually(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash"), timeout, interval).ShouldNot(BeEmpty())
@@ -233,7 +233,7 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			Eventually(testAdminAPI.PropertyGetter("prop-no-restart"), timeout, interval).Should(Equal("the-value2"))
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 
 			By("Not changing the hash")
 			Expect(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash")()).To(Equal(hash1))
@@ -252,10 +252,51 @@ var _ = Describe("RedPandaCluster configuration controller", func() {
 			Consistently(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash"), timeoutShort, intervalShort).Should(Equal(hash2))
 
 			By("Synchronizing the condition")
-			Eventually(clusterConfiguredGetter(key), timeout, interval).Should(BeTrue())
+			Eventually(clusterConfiguredConditionStatusGetter(key), timeout, interval).Should(BeTrue())
 
 			By("Not calling the admin API for node property changes")
 			Consistently(testAdminAPI.NumPatchesGetter(), timeoutShort, intervalShort).Should(Equal(numberOfPatches))
+		})
+
+	})
+
+	Context("When reconciling a cluster without centralized configuration", func() {
+
+		It("Should behave like before", func() {
+
+			By("Allowing creation of a cluster with an old version")
+			key, baseKey, redpandaCluster := getInitialTestCluster("no-central")
+			redpandaCluster.Spec.Version = "v21.1.1-dev" // feature gate disables centralized config
+			Expect(k8sClient.Create(context.Background(), redpandaCluster)).Should(Succeed())
+
+			By("Creating the Configmap and the statefulset")
+			Eventually(resourceGetter(baseKey, &corev1.ConfigMap{}), timeout, interval).Should(Succeed())
+			Eventually(resourceGetter(key, &appsv1.StatefulSet{}), timeout, interval).Should(Succeed())
+
+			By("Not using the condition")
+			Consistently(clusterConfiguredConditionGetter(key), timeoutShort, intervalShort).Should(BeNil())
+
+			By("Using the hash annotation directly")
+			hash := annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash")()
+			Expect(hash).NotTo(BeEmpty())
+			Consistently(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash"), timeoutShort, intervalShort).Should(Equal(hash))
+
+			By("Not calling the admin API")
+			Consistently(testAdminAPI.NumPatchesGetter(), timeoutShort, intervalShort).Should(Equal(0))
+
+			By("Accepting a change to any property")
+			Expect(k8sClient.Get(context.Background(), key, redpandaCluster)).To(Succeed())
+			if redpandaCluster.Spec.AdditionalConfiguration == nil {
+				redpandaCluster.Spec.AdditionalConfiguration = make(map[string]string)
+			}
+			redpandaCluster.Spec.AdditionalConfiguration["redpanda.x"] = "any-val"
+			Expect(k8sClient.Update(context.Background(), redpandaCluster)).To(Succeed())
+
+			By("Changing the hash annotation again")
+			Eventually(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash"), timeout, interval).ShouldNot(Equal(hash))
+			hash2 := annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash")()
+			Expect(hash2).NotTo(BeEmpty())
+			Consistently(annotationGetter(key, &appsv1.StatefulSet{}, "redpanda.vectorized.io/configmap-hash"), timeoutShort, intervalShort).Should(Equal(hash2))
 		})
 
 	})
@@ -318,16 +359,26 @@ func annotationGetter(key client.ObjectKey, resource client.Object, name string)
 		if err := resourceGetter(key, resource)(); err != nil {
 			return fmt.Sprintf("client error: %+v", err)
 		}
+		if sts, ok := resource.(*appsv1.StatefulSet); ok {
+			return sts.Spec.Template.Annotations[name]
+		}
 		return resource.GetAnnotations()[name]
 	}
 }
 
-func clusterConfiguredGetter(key client.ObjectKey) func() bool {
-	return func() bool {
+func clusterConfiguredConditionGetter(key client.ObjectKey) func() *v1alpha1.ClusterCondition {
+	return func() *v1alpha1.ClusterCondition {
 		var cluster v1alpha1.Cluster
 		if err := k8sClient.Get(context.Background(), key, &cluster); err != nil {
-			return false
+			return nil
 		}
-		return cluster.Status.GetConditionStatus(v1alpha1.ClusterConfiguredConditionType) == corev1.ConditionTrue
+		return cluster.Status.GetCondition(v1alpha1.ClusterConfiguredConditionType)
+	}
+}
+
+func clusterConfiguredConditionStatusGetter(key client.ObjectKey) func() bool {
+	return func() bool {
+		cond := clusterConfiguredConditionGetter(key)()
+		return cond != nil && cond.Status == corev1.ConditionTrue
 	}
 }

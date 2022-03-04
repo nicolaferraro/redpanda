@@ -23,6 +23,7 @@ import (
 	"github.com/vectorizedio/redpanda/src/go/k8s/pkg/resources/featuregates"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -192,20 +193,50 @@ func (r *StatefulSetResource) Ensure(ctx context.Context) error {
 	if featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
 		// When using central config, the statefulset must retain the configuration hash set on the existing resource
 		// by a secondary controller.
-		// TODO: remove this when switching to server side apply.
 		newSts := obj.(*appsv1.StatefulSet)
-		if _, ok := newSts.Annotations[ConfigMapHashAnnotationKey]; !ok {
-			if oldVal, oldOk := sts.Annotations[ConfigMapHashAnnotationKey]; oldOk {
-				if newSts.Annotations == nil {
-					newSts.Annotations = make(map[string]string)
+		if _, ok := newSts.Spec.Template.Annotations[ConfigMapHashAnnotationKey]; !ok {
+			if oldVal, oldOk := sts.Spec.Template.Annotations[ConfigMapHashAnnotationKey]; oldOk {
+				if newSts.Spec.Template.Annotations == nil {
+					newSts.Spec.Template.Annotations = make(map[string]string)
 				}
-				newSts.Annotations[ConfigMapHashAnnotationKey] = oldVal
+				newSts.Spec.Template.Annotations[ConfigMapHashAnnotationKey] = oldVal
 			}
 		}
 	}
 
 	r.logger.Info("Running update", "resource name", r.Key().Name)
 	return r.runUpdate(ctx, &sts, obj.(*appsv1.StatefulSet))
+}
+
+func (r *StatefulSetResource) GetConfigMapHashFromCluster(
+	ctx context.Context,
+) (string, error) {
+	existing := appsv1.StatefulSet{}
+	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
+		return "", fmt.Errorf("could not load statefulset for reading the configmap hash: %w", err)
+	}
+	if hash, ok := existing.Spec.Template.Annotations[ConfigMapHashAnnotationKey]; ok {
+		return hash, nil
+	}
+	return "", nil
+}
+
+func (r *StatefulSetResource) SetConfigMapHashInCluster(
+	ctx context.Context, hash string,
+) error {
+	existing := appsv1.StatefulSet{}
+	if err := r.Client.Get(ctx, r.Key(), &existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			// No place where to store it
+			return nil
+		}
+		return fmt.Errorf("could not load statefulset for storing the configmap hash: %w", err)
+	}
+	if existing.Spec.Template.Annotations == nil {
+		existing.Spec.Template.Annotations = make(map[string]string)
+	}
+	existing.Spec.Template.Annotations[ConfigMapHashAnnotationKey] = hash
+	return r.Update(ctx, &existing)
 }
 
 func preparePVCResource(

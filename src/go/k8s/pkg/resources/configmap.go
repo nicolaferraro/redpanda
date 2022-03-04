@@ -623,7 +623,7 @@ func (r *ConfigMapResource) GetNodeConfigHash(
 	return fmt.Sprintf("%x", md5Hash), nil
 }
 
-func (r *ConfigMapResource) CheckCentralizedConfigurationDrift(
+func (r *ConfigMapResource) CheckCentralizedConfigurationDriftWithCluster(
 	ctx context.Context,
 ) (bool, error) {
 	if !featuregates.CentralizedConfiguration(r.pandaCluster.Spec.Version) {
@@ -648,7 +648,7 @@ func (r *ConfigMapResource) CheckCentralizedConfigurationDrift(
 	return !reflect.DeepEqual(oldConfig, newConfig), nil
 }
 
-func (r *ConfigMapResource) GetLastAppliedConfiguration(
+func (r *ConfigMapResource) GetLastAppliedConfigurationFromCluster(
 	ctx context.Context,
 ) (map[string]interface{}, bool, error) {
 	existing := corev1.ConfigMap{}
@@ -669,7 +669,7 @@ func (r *ConfigMapResource) GetLastAppliedConfiguration(
 	return nil, false, nil
 }
 
-func (r *ConfigMapResource) SetLastAppliedConfiguration(
+func (r *ConfigMapResource) SetLastAppliedConfigurationInCluster(
 	ctx context.Context, config map[string]interface{},
 ) error {
 	existing := corev1.ConfigMap{}
@@ -688,12 +688,15 @@ func (r *ConfigMapResource) SetLastAppliedConfiguration(
 	if err != nil {
 		return fmt.Errorf("could not marhsal configuration: %w", err)
 	}
-
-	if existing.Annotations == nil {
-		existing.Annotations = make(map[string]string)
+	newAnnotation := string(ser)
+	if existing.Annotations[LastAppliedConfigurationAnnotationKey] != newAnnotation {
+		if existing.Annotations == nil {
+			existing.Annotations = make(map[string]string)
+		}
+		existing.Annotations[LastAppliedConfigurationAnnotationKey] = string(ser)
+		return r.Update(ctx, &existing)
 	}
-	existing.Annotations[LastAppliedConfigurationAnnotationKey] = string(ser)
-	return r.Update(ctx, &existing)
+	return nil
 }
 
 func (r *ConfigMapResource) GetCurrentGlobalConfigurationFromCluster(

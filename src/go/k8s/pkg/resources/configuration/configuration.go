@@ -54,6 +54,7 @@ func (c *GlobalConfiguration) SetAdditionalFlatProperties(
 
 // GetHash computes a hash of the configuration considering all node properties and only the cluster properties
 // that require a restart (this is why the schema is needed).
+// We assume that properties not in schema require restart.
 func (c *GlobalConfiguration) GetHash(
 	schema admin.ConfigSchema,
 ) (string, error) {
@@ -62,7 +63,7 @@ func (c *GlobalConfiguration) GetHash(
 	// Ignore cluster properties that don't need restart
 	clone.ClusterConfiguration = make(map[string]interface{})
 	for k, v := range c.ClusterConfiguration {
-		if meta, ok := schema[k]; ok && meta.NeedsRestart {
+		if meta, ok := schema[k]; !ok || meta.NeedsRestart {
 			clone.ClusterConfiguration[k] = v
 		}
 	}
@@ -70,7 +71,7 @@ func (c *GlobalConfiguration) GetHash(
 	// Ignore redpanda additional properties that don't need restart
 	clone.NodeConfiguration.Redpanda.Other = make(map[string]interface{})
 	for k, v := range c.NodeConfiguration.Redpanda.Other {
-		if meta, ok := schema[k]; ok && meta.NeedsRestart {
+		if meta, ok := schema[k]; !ok || meta.NeedsRestart {
 			clone.NodeConfiguration.Redpanda.Other[k] = v
 		}
 	}
@@ -82,7 +83,7 @@ func (c *GlobalConfiguration) GetHash(
 
 	full := append([]byte{}, serialized.RedpandaFile...)
 	full = append(full, serialized.BootstrapFile...)
-
+	// We keep using md5 for compatibility with previous approach
 	md5Hash := md5.Sum(full) // nolint:gosec // this is not encrypting secure info
 	return fmt.Sprintf("%x", md5Hash), nil
 }
